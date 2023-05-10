@@ -1,18 +1,16 @@
-# GPU 0, 8
+# GPU 3, 11
 
-##################################### 230508 ######################################
+##################################### 230430 ######################################
 exp_code='task_2_tumor_typing_only_major_two_CLAM_100'
 data_root_dir='/shared/js.yun/data/CLAM_data/'
 feature_folder='TCGA-breast-features'
-# results_dir='/shared/js.yun/logs/CLAM/TCGA-breast-results/'
-results_dir='/shared/js.yun/logs/CLAM/temp/'
+results_dir='/shared/js.yun/logs/CLAM/TCGA-breast-results/'
 split_dir='/shared/js.yun/data/CLAM_data/TCGA-breast-splits-tumor-major-two/task_2_tumor_subtyping_100/'
 csv_path='/shared/js.yun/CLAM/dataset_csv/TCGA-breast-tumor-major-two.csv'
 label_dict='{"Infiltrating Ductal Carcinoma":0,"Infiltrating Lobular Carcinoma":1}'
 
-CUDA_VISIBLE_DEVICES=8 python main.py --drop_out \
-                                    --early_stopping \
-                                    --lr 2e-4 \
+CUDA_VISIBLE_DEVICES=11 python main.py --drop_out \
+                                    --lr 0.01 \
                                     --k 10 \
                                     --label_frac 1 \
                                     --exp_code $exp_code \
@@ -20,7 +18,7 @@ CUDA_VISIBLE_DEVICES=8 python main.py --drop_out \
                                     --bag_loss ce \
                                     --inst_loss svm \
                                     --task task_2_tumor_subtyping \
-                                    --model_type clam_sb \
+                                    --model_type clam_mb \
                                     --log_data \
                                     --data_root_dir $data_root_dir \
                                     --feature_folder $feature_folder \
@@ -28,13 +26,45 @@ CUDA_VISIBLE_DEVICES=8 python main.py --drop_out \
                                     --split_dir $split_dir \
                                     --csv_path $csv_path \
                                     --subtyping \
-                                    --opt adam \
-                                    --decay_epoch 300 1000 \
+                                    --opt sgd \
+                                    --decay_epoch 100 150 \
                                     --max_epochs 200 \
-                                    --label_dict "$label_dict"
+                                    --label_dict "$label_dict" \
+                                    --attn 'js'
 
 
 
+##################################### 230426 ######################################
+# exp_code='sgd0.01_LUSC_vs_LUAD_CLAM_100_task2_mb'
+# data_root_dir='/shared/js.yun/data/CLAM_data/'
+# feature_folder='TCGA-lung-features'
+# results_dir='/shared/js.yun/logs/CLAM/TCGA-lung-results/'
+# split_dir='/shared/js.yun/data/CLAM_data/TCGA-lung-splits/task_2_tumor_subtyping_100/'
+# csv_path='/shared/js.yun/CLAM/dataset_csv/TCGA-lung.csv'
+
+# CUDA_VISIBLE_DEVICES=8 python main.py --drop_out \
+#                                     --early_stopping \
+#                                     --lr 0.01 \
+#                                     --k 10 \
+#                                     --label_frac 1 \
+#                                     --exp_code $exp_code \
+#                                     --weighted_sample \
+#                                     --bag_loss ce \
+#                                     --inst_loss svm \
+#                                     --task task_2_tumor_subtyping \
+#                                     --model_type clam_mb \
+#                                     --log_data \
+#                                     --data_root_dir $data_root_dir \
+#                                     --feature_folder $feature_folder \
+#                                     --results_dir $results_dir \
+#                                     --split_dir $split_dir \
+#                                     --csv_path $csv_path \
+#                                     --subtyping \
+#                                     --opt sgd \
+#                                     --decay_epoch 30 50
+
+
+                                    
 # CUDA_VISIBLE_DEVICES=10 python create_patches_fp.py --patch_size 256 --seg --patch --stitch 
 
 
@@ -93,16 +123,16 @@ CUDA_VISIBLE_DEVICES=8 python main.py --drop_out \
 
 
 ##### 
-# exp_code='sgd0.01_LUSC_vs_LUAD_CLAM_100_task2_mb'
+# exp_code='js_LUSC_vs_LUAD_CLAM_100_task2_mb'
 # data_root_dir='/shared/js.yun/data/CLAM_data/'
 # feature_folder='TCGA-lung-features'
 # results_dir='/shared/js.yun/logs/CLAM/TCGA-lung-results/'
 # split_dir='/shared/js.yun/data/CLAM_data/TCGA-lung-splits/task_2_tumor_subtyping_100/'
 # csv_path='/shared/js.yun/CLAM/dataset_csv/TCGA-lung.csv'
 
-# CUDA_VISIBLE_DEVICES=8 python main.py --drop_out \
+# CUDA_VISIBLE_DEVICES=11 python main.py --drop_out \
 #                                     --early_stopping \
-#                                     --lr 0.01 \
+#                                     --lr 2e-4 \
 #                                     --k 10 \
 #                                     --label_frac 1 \
 #                                     --exp_code $exp_code \
@@ -118,5 +148,4 @@ CUDA_VISIBLE_DEVICES=8 python main.py --drop_out \
 #                                     --split_dir $split_dir \
 #                                     --csv_path $csv_path \
 #                                     --subtyping \
-#                                     --opt sgd \
-#                                     --decay_epoch 30 50
+#                                     --gate 'js'

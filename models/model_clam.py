@@ -4,6 +4,11 @@ import torch.nn.functional as F
 from utils.utils import initialize_weights
 import numpy as np
 
+# JS
+from torch.cuda.amp import autocast
+from einops import rearrange, repeat
+from einops.layers.torch import Rearrange
+
 """
 Attention Network without Gating (2 fc layers)
 args:
@@ -13,7 +18,9 @@ args:
     n_classes: number of classes 
 """
 class Attn_Net(nn.Module):
-
+    """
+    실제 모델에서는 안쓰는거 같음
+    """
     def __init__(self, L = 1024, D = 256, dropout = False, n_classes = 1):
         super(Attn_Net, self).__init__()
         self.module = [
@@ -63,6 +70,77 @@ class Attn_Net_Gated(nn.Module):
         A = self.attention_c(A)  # N x n_classes
         return A, x
 
+
+class Attn_Net_js(nn.Module):
+    def __init__(self, L = 1024, D = 256, dropout = False, n_classes = 1):
+        super(Attn_Net_js, self).__init__()
+
+        self.attention_a = [
+            nn.Linear(L, D),
+            nn.Sigmoid()]
+        
+        self.attention_b = [nn.Linear(L, D),
+                            nn.Sigmoid()]
+        if dropout:
+            self.attention_a.append(nn.Dropout(0.5))
+            self.attention_b.append(nn.Dropout(0.5))
+
+        self.attention_a = nn.Sequential(*self.attention_a)
+        self.attention_b = nn.Sequential(*self.attention_b)
+        
+        self.gelu = nn.GELU()
+        self.attention_c = nn.Linear(D, n_classes)
+
+    def forward(self, x):
+        a = self.attention_a(x)
+        b = self.attention_b(x)
+        A = a.mul(b)
+        A = self.gelu(A)
+        A = self.attention_c(A)  # N x n_classes
+        return A, x
+
+class Attn_Net_js2(nn.Module):
+    """
+    ViT Sytle attention
+    """
+    def __init__(self, L = 1024, D = 64, heads = 8, dropout = False, n_classes = 1):
+        super(Attn_Net_js2, self).__init__()
+
+        self.heads = heads
+        inner_dim = D * heads
+        self.to_qkv = nn.Linear(L, inner_dim*3, bias = False)        
+        
+        self.attend = nn.Softmax(dim = -1)
+        if dropout:
+            self.dropout = nn.Dropout(0.5)
+        self.to_out = nn.Linear(inner_dim, n_classes)
+
+    def forward(self, x):
+        # print(x.size()) # [24215, 512]
+        qkv = self.to_qkv(x).chunk(3, dim = -1)
+        # print(qkv[0].size())    # [24215, 2048]
+        q, k, v = map(lambda t: rearrange(t, 'p (h d) -> p h d', h = self.heads), qkv)
+        # print(q.size()) # [24215, 8, 256]
+
+        # print(k.transpose(-1, -2).size())   # [24215, 256, 8]
+        dots = torch.matmul(q.transpose(-1, -2), k)
+        # print(dots.size())  # [24215, 256, 256]
+
+        attn = self.attend(dots)
+        # print(attn.size())  # [24215, 256, 256]
+        if self.dropout:
+            attn = self.dropout(attn)
+        
+        v = rearrange(v, 'p h d -> p d h')
+        out = torch.matmul(attn, v)
+        # print(out.size())       # [24215, 256, 8]
+        out = rearrange(out, 'b h d -> b (h d)')
+        # print(out.size())       # [24215, 2048]
+        return self.to_out(out), x
+    
+
+
+
 """
 args:
     gate: whether to use gated attention network
@@ -75,16 +153,18 @@ args:
     subtyping: whether it's a subtyping problem
 """
 class CLAM_SB(nn.Module):
-    def __init__(self, gate = True, size_arg = "small", dropout = False, k_sample=8, n_classes=2,
-        instance_loss_fn=nn.CrossEntropyLoss(), subtyping=False):
+    def __init__(self, attn = 'gated', size_arg = "small", dropout = False, k_sample=8, n_classes=2,
+                    instance_loss_fn=nn.CrossEntropyLoss(), subtyping=False):
         super(CLAM_SB, self).__init__()
         self.size_dict = {"small": [1024, 512, 256], "big": [1024, 512, 384], "custom1":[512, 512, 256], "custom2":[768, 512, 256]}
         size = self.size_dict[size_arg]
         fc = [nn.Linear(size[0], size[1]), nn.ReLU()]
         if dropout:
             fc.append(nn.Dropout(0.25))
-        if gate:
+        if attn == 'gated':
             attention_net = Attn_Net_Gated(L = size[1], D = size[2], dropout = dropout, n_classes = 1)
+        elif attn == 'js':
+            attention_net = Attn_Net_js(L = size[1], D = size[2], dropout = dropout, n_classes = 1)
         else:
             attention_net = Attn_Net(L = size[1], D = size[2], dropout = dropout, n_classes = 1)
         fc.append(attention_net)
@@ -107,10 +187,10 @@ class CLAM_SB(nn.Module):
     
     @staticmethod
     def create_positive_targets(length, device):
-        return torch.full((length, ), 1, device=device).long()
+        return torch.full((length, ), 1, device=device)              # .long()
     @staticmethod
     def create_negative_targets(length, device):
-        return torch.full((length, ), 0, device=device).long()
+        return torch.full((length, ), 0, device=device)              # .long()
     
     #instance-level evaluation for in-the-class attention branch
     def inst_eval(self, A, h, classifier): 
@@ -144,14 +224,16 @@ class CLAM_SB(nn.Module):
         instance_loss = self.instance_loss_fn(logits, p_targets)
         return instance_loss, p_preds, p_targets
 
+    @autocast()
     def forward(self, h, label=None, instance_eval=False, return_features=False, attention_only=False):
         device = h.device
-        A, h = self.attention_net(h)  # NxK        
-        A = torch.transpose(A, 1, 0)  # KxN
+        A, h = self.attention_net(h)  # Nx1 (N: slide당 patch 개수)
+        A = torch.transpose(A, 1, 0)  # Kx1
         if attention_only:
             return A
         A_raw = A
         A = F.softmax(A, dim=1)  # softmax over N
+        # print(A.size())     # (1,N)
 
         if instance_eval:
             total_inst_loss = 0.0
@@ -178,6 +260,7 @@ class CLAM_SB(nn.Module):
                 total_inst_loss /= len(self.instance_classifiers)
                 
         M = torch.mm(A, h) 
+        print(M.size())     # [1, 512]
         logits = self.classifiers(M)
         Y_hat = torch.topk(logits, 1, dim = 1)[1]
         Y_prob = F.softmax(logits, dim = 1)
@@ -191,16 +274,22 @@ class CLAM_SB(nn.Module):
         return logits, Y_prob, Y_hat, A_raw, results_dict
 
 class CLAM_MB(CLAM_SB):
-    def __init__(self, gate = True, size_arg = "small", dropout = False, k_sample=8, n_classes=2,
+    def __init__(self, attn = 'gated', size_arg = "small", dropout = False, k_sample=8, n_classes=2,
         instance_loss_fn=nn.CrossEntropyLoss(), subtyping=False):
         nn.Module.__init__(self)
         self.size_dict = {"small": [1024, 512, 256], "big": [1024, 512, 384]}
         size = self.size_dict[size_arg]
-        fc = [nn.Linear(size[0], size[1]), nn.ReLU()]
+        # fc = [nn.Linear(size[0], size[1]), nn.ReLU()]
+        fc = [nn.Linear(size[0], size[1]), nn.GeLU()]
         if dropout:
             fc.append(nn.Dropout(0.25))
-        if gate:
+        if attn == 'gated':
+            # default
             attention_net = Attn_Net_Gated(L = size[1], D = size[2], dropout = dropout, n_classes = n_classes)
+        elif attn == 'js':
+            attention_net = Attn_Net_js(L = size[1], D = size[2], dropout = dropout, n_classes = n_classes)
+        elif attn == 'js2':
+            attention_net = Attn_Net_js2(L = size[1], D = 64, dropout = dropout, n_classes = n_classes)
         else:
             attention_net = Attn_Net(L = size[1], D = size[2], dropout = dropout, n_classes = n_classes)
         fc.append(attention_net)
@@ -215,14 +304,19 @@ class CLAM_MB(CLAM_SB):
         self.subtyping = subtyping
         initialize_weights(self)
 
+    @autocast()
     def forward(self, h, label=None, instance_eval=False, return_features=False, attention_only=False):
         device = h.device
-        A, h = self.attention_net(h)  # NxK        
+        # print(h.size())     # (N,1024=feature_dim)
+        A, h = self.attention_net(h)  # NxK (N: slide당 patch 개수, K: n_class)       
+        # print(A.size())   # (N,K)
+        # print(h.size())   # (N,512=small_feature_dim)
         A = torch.transpose(A, 1, 0)  # KxN
         if attention_only:
             return A
         A_raw = A
         A = F.softmax(A, dim=1)  # softmax over N
+        # print(A.size()) # (n_class,N)
 
         if instance_eval:
             total_inst_loss = 0.0
@@ -248,7 +342,8 @@ class CLAM_MB(CLAM_SB):
             if self.subtyping:
                 total_inst_loss /= len(self.instance_classifiers)
 
-        M = torch.mm(A, h) 
+        M = torch.mm(A, h)  # (KxN)*(Nx512)
+        # print(M.size())   # (K,512)
         logits = torch.empty(1, self.n_classes).float().to(device)
         for c in range(self.n_classes):
             logits[0, c] = self.classifiers[c](M[c])

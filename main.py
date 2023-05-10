@@ -24,6 +24,10 @@ import torch.nn.functional as F
 import pandas as pd
 import numpy as np
 
+# js
+import json
+import logging
+
 
 def main(args):
     # create results directory if necessary 
@@ -76,6 +80,8 @@ parser.add_argument('--max_epochs', type=int, default=200,
                     help='maximum number of epochs to train (default: 200)')
 parser.add_argument('--lr', type=float, default=1e-4,
                     help='learning rate (default: 0.0001)')
+parser.add_argument('--decay_epoch', type=int, nargs='+', default=[150,225], 
+                        help='Learning Rate Decay Steps')
 parser.add_argument('--label_frac', type=float, default=1.0,
                     help='fraction of training labels (default: 1.0)')
 parser.add_argument('--reg', type=float, default=1e-5,
@@ -104,6 +110,7 @@ parser.add_argument('--exp_code', type=str, help='experiment code for saving res
 parser.add_argument('--weighted_sample', action='store_true', default=False, help='enable weighted sampling')
 parser.add_argument('--model_size', type=str, choices=['small', 'big', 'custom1'], default='small', help='size of model, does not affect mil')
 parser.add_argument('--task', type=str, choices=['task_1_tumor_vs_normal',  'task_2_tumor_subtyping'])
+parser.add_argument('--label_dict', type=json.loads, default='{"LUSC":0, "LUAD":1}')
 ### CLAM specific options
 parser.add_argument('--no_inst_cluster', action='store_true', default=False,
                      help='disable instance-level clustering')
@@ -114,7 +121,11 @@ parser.add_argument('--subtyping', action='store_true', default=False,
 parser.add_argument('--bag_weight', type=float, default=0.7,
                     help='clam: weight coefficient for bag-level loss (default: 0.7)')
 parser.add_argument('--B', type=int, default=8, help='numbr of positive/negative patches to sample for clam')
+parser.add_argument('--attn', type=str, default="gated", help='type of attention')
 args = parser.parse_args()
+# print(args.label_dict)
+# print(type(args.label_dict))
+# exit()
 
 ### TCGA-kidney subtyping ###
 # args.bag_weight = 0.3         # 왜 0.7이 아니고 0.3으로 하셨는지?
@@ -153,7 +164,7 @@ args = parser.parse_args()
 #args.split_dir = '/shared/j.jang/pathai/data/TCGA-lung-splits/task_1_tumor_vs_normal_100/'
 # args.split_dir = '/shared/j.jang/pathai/data/TCGA-breast-splits-tumor-major-two/task_2_tumor_subtyping_100/'
 
-args.label_dict = {'LUSC':0, 'LUAD':1}
+# args.label_dict = {'LUSC':0, 'LUAD':1}
 #args.label_dict = {'subtype_1':0, 'subtype_2':1, 'subtype_3':2}
 #args.label_dict = {'BRCA_Basal':0, 'BRCA_Her2':1, 'BRCA_LumA':2, 'BRCA_LumB':3, 'Others':4}
 #args.label_dict = {'Metaplastic Breast Cancer':0, 'Breast Invasive Mixed Mucinous Carcinoma':1,'Breast Invasive Lobular Carcinoma':2,'Breast Invasive Ductal Carcinoma':3,'Breast Invasive Carcinoma (NOS)':4}
@@ -191,7 +202,7 @@ def seed_torch(seed=7):
 
 seed_torch(args.seed)
 
-encoding_size = 1024
+# encoding_size = 1024
 settings = {'num_splits': args.k, 
             'k_start': args.k_start,
             'k_end': args.k_end,
@@ -221,8 +232,8 @@ if args.task == 'task_1_tumor_vs_normal':
     args.n_classes=n_classes
     dataset = Generic_MIL_Dataset(#csv_path = 'dataset_csv/tumor_vs_normal_dummy_clean.csv',
                                   csv_path = args.csv_path,
-                            #data_dir= os.path.join(args.data_root_dir, 'tumor_vs_normal_resnet_features'),
-                            data_dir= os.path.join(args.data_root_dir, 'TCGA-lung-features'),
+                            data_dir= os.path.join(args.data_root_dir, args.feature_folder),
+                            # data_dir= os.path.join(args.data_root_dir, 'TCGA-lung-features'),
                             shuffle = False, 
                             seed = args.seed, 
                             print_info = True,
@@ -251,12 +262,30 @@ elif args.task == 'task_2_tumor_subtyping':
 else:
     raise NotImplementedError
     
-if not os.path.isdir(args.results_dir):
-    os.mkdir(args.results_dir)
+def change_permissions_recursive(path, mode=0o777):
+    for root, dirs, files in os.walk(path, topdown=False):
+        for dir in [os.path.join(root,d) for d in dirs]:
+            os.chmod(dir, mode)
+    for file in [os.path.join(root, f) for f in files]:
+            os.chmod(file, mode)
 
-args.results_dir = os.path.join(args.results_dir, str(args.exp_code) + '_s{}'.format(args.seed))
-if not os.path.isdir(args.results_dir):
-    os.mkdir(args.results_dir)
+# if not os.path.isdir(args.results_dir):
+#     os.mkdir(args.results_dir)
+# change_permissions_recursive(args.results_dir)
+
+##################################################################
+# 이하 전부 logging용 코드
+args.scheduler = None
+hp_setting = f'{args.attn}_{args.opt}_lr_{args.lr}_sch_{args.scheduler}_decay_{args.decay_epoch}\
+_wd_{args.reg}_epoch{args.max_epochs}_stop_{args.early_stopping}_drop_{args.drop_out}_B{args.B}\
+'.replace("[", "").replace("]", "").replace(",", "_").replace(" ", "")
+
+i=0
+while os.path.isdir(os.path.join(args.results_dir, str(args.exp_code) + '/' + hp_setting + f'_s{args.seed}_{str(i)}')):
+    i+=1
+args.results_dir = os.path.join(args.results_dir, str(args.exp_code) + '/' + hp_setting + f'_s{args.seed}_{str(i)}')
+os.makedirs(args.results_dir, exist_ok=True)
+change_permissions_recursive(args.results_dir+'/../')
 
 if args.split_dir is None:
     args.split_dir = os.path.join('splits', args.task+'_{}'.format(int(args.label_frac*100)))
@@ -272,6 +301,9 @@ settings.update({'split_dir': args.split_dir})
 with open(args.results_dir + '/experiment_{}.txt'.format(args.exp_code), 'w') as f:
     print(settings, file=f)
 f.close()
+with open(args.results_dir + '/args_{}.txt'.format(args.exp_code), 'w') as f:
+    print(args, file=f)
+f.close()
 
 print("################# Settings ###################")
 for key, val in settings.items():
@@ -279,7 +311,7 @@ for key, val in settings.items():
 
 if __name__ == "__main__":
     results = main(args)
+    change_permissions_recursive(args.results_dir)
     print("finished!")
     print("end script")
-
 

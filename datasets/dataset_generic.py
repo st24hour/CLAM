@@ -64,7 +64,7 @@ class Generic_WSI_Classification_Dataset(Dataset):
 
 		slide_data = pd.read_csv(csv_path)
 		slide_data = self.filter_df(slide_data, filter_dict)
-		slide_data = self.df_prep(slide_data, self.label_dict, ignore, self.label_col)
+		slide_data = self.df_prep(slide_data, self.label_dict, ignore, self.label_col)		# label을 숫자로 변경
 
 		###shuffle data
 		if shuffle:
@@ -73,11 +73,11 @@ class Generic_WSI_Classification_Dataset(Dataset):
 
 		self.slide_data = slide_data
 
-		self.patient_data_prep(patient_voting)
-		self.cls_ids_prep()
+		self.patient_data_prep(patient_voting)		# self.patient_data = {'case_id':patients, 'label':np.array(patient_labels)} 만듦
+		self.cls_ids_prep()							# self.patient_cls_ids, self.slide_cls_ids
 
 		if print_info:
-			self.summarize()
+			self.summarize()						# print
 
 	def cls_ids_prep(self):
 		# store ids corresponding each class at the patient or case level
@@ -118,8 +118,7 @@ class Generic_WSI_Classification_Dataset(Dataset):
 		data.reset_index(drop=True, inplace=True)
 		for i in data.index:
 			key = data.loc[i, 'label']
-			data.at[i, 'label'] = label_dict[key]
-
+			data.at[i, 'label'] = label_dict[key]		# label을 subtype 이름에서 숫자로 변경
 		return data
 
 	def filter_df(self, df, filter_dict={}):
@@ -315,6 +314,11 @@ class Generic_WSI_Classification_Dataset(Dataset):
 
 
 class Generic_MIL_Dataset(Generic_WSI_Classification_Dataset):
+	'''
+	slide 하나씩 불러옴
+	전체 slide patch들의 feature를 불러옴 
+	dim: (num_patch,1024)
+	'''
 	def __init__(self,
 		data_dir, 
 		**kwargs):
@@ -346,7 +350,7 @@ class Generic_MIL_Dataset(Generic_WSI_Classification_Dataset):
 			else:
 				return slide_id, label
 
-		else:
+		else:	# patch coordinates까지 포함되어 있음. coordinate 정보까지 이용하면 도움될 것 같은데 사용 안하고 있음
 			full_path = os.path.join(data_dir,'h5_files','{}.h5'.format(slide_id))
 			with h5py.File(full_path,'r') as hdf5_file:
 				features = hdf5_file['features'][:]

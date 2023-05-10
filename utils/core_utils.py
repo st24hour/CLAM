@@ -9,6 +9,10 @@ from sklearn.preprocessing import label_binarize
 from sklearn.metrics import roc_auc_score, roc_curve
 from sklearn.metrics import auc as calc_auc
 
+from torch.cuda.amp import GradScaler
+from torch.cuda.amp import autocast
+import time
+
 class Accuracy_Logger(object):
     """Accuracy logger"""
     def __init__(self, n_classes):
@@ -99,7 +103,7 @@ def train(datasets, cur, args):
     if args.log_data:
         from tensorboardX import SummaryWriter
         writer = SummaryWriter(writer_dir, flush_secs=15)
-
+        
     else:
         writer = None
 
@@ -123,6 +127,7 @@ def train(datasets, cur, args):
     
     print('\nInit Model...', end=' ')
     model_dict = {"dropout": args.drop_out, 'n_classes': args.n_classes}
+    model_dict.update({"attn": args.attn})
     
     if args.model_size is not None and args.model_type != 'mil':
         model_dict.update({"size_arg": args.model_size})
@@ -141,7 +146,7 @@ def train(datasets, cur, args):
                 instance_loss_fn = instance_loss_fn.cuda()
         else:
             instance_loss_fn = nn.CrossEntropyLoss()
-        
+
         if args.model_type =='clam_sb':
             model = CLAM_SB(**model_dict, instance_loss_fn=instance_loss_fn)
         elif args.model_type == 'clam_mb':
@@ -155,12 +160,14 @@ def train(datasets, cur, args):
         else:
             model = MIL_fc(**model_dict)
     
-    model.relocate()
+    # model.relocate() # ??? 모듈별로 cuda로 보내야되는 이유가 있는지???
+    model.to(device)
     print('Done!')
     print_network(model)
 
     print('\nInit optimizer ...', end=' ')
     optimizer = get_optim(model, args)
+    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.decay_epoch, gamma=0.1)
     print('Done!')
     
     print('\nInit Loaders...', end=' ')
@@ -178,6 +185,7 @@ def train(datasets, cur, args):
     print('Done!')
 
     for epoch in range(args.max_epochs):
+        scheduler.step(epoch)
         if args.model_type in ['clam_sb', 'clam_mb'] and not args.no_inst_cluster:     
             train_loop_clam(epoch, model, train_loader, optimizer, args.n_classes, args.bag_weight, writer, loss_fn)
             stop = validate_clam(cur, epoch, model, val_loader, args.n_classes, 
@@ -221,6 +229,7 @@ def train(datasets, cur, args):
 def train_loop_clam(epoch, model, loader, optimizer, n_classes, bag_weight, writer = None, loss_fn = None):
     device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.train()
+    scaler = GradScaler()
     acc_logger = Accuracy_Logger(n_classes=n_classes)
     inst_logger = Accuracy_Logger(n_classes=n_classes)
     
@@ -230,41 +239,52 @@ def train_loop_clam(epoch, model, loader, optimizer, n_classes, bag_weight, writ
     inst_count = 0
 
     print('\n')
+    end = time.time()   
     for batch_idx, (data, label) in enumerate(loader):
         data, label = data.to(device), label.to(device)
-        if data.dtype == torch.float16:
-            data = data.to(torch.float32)#, label.to(torch.int32)
-            
-        logits, Y_prob, Y_hat, _, instance_dict = model(data, label=label, instance_eval=True)
+        # if data.dtype == torch.float16:
+        #     data = data.to(torch.float32)#, label.to(torch.int32)
+        # data = data.to(torch.float16)
+        # print(data.size())
 
+        with autocast(enabled=True):    
+            logits, Y_prob, Y_hat, _, instance_dict = model(data, label=label, instance_eval=True)
+            loss = loss_fn(logits, label)
+            instance_loss = instance_dict['instance_loss']
+            total_loss = bag_weight * loss + (1-bag_weight) * instance_loss 
+                
         acc_logger.log(Y_hat, label)
-        loss = loss_fn(logits, label)
         loss_value = loss.item()
-
-        instance_loss = instance_dict['instance_loss']
         inst_count+=1
         instance_loss_value = instance_loss.item()
         train_inst_loss += instance_loss_value
         
-        total_loss = bag_weight * loss + (1-bag_weight) * instance_loss 
-
         inst_preds = instance_dict['inst_preds']
         inst_labels = instance_dict['inst_labels']
         inst_logger.log_batch(inst_preds, inst_labels)
 
+        # measure elapsed time
+        duration = time.time() - end
+        end = time.time()
+
         train_loss += loss_value
         if (batch_idx + 1) % 20 == 0:
-            print('batch {}, loss: {:.4f}, instance_loss: {:.4f}, weighted_loss: {:.4f}, '.format(batch_idx, loss_value, instance_loss_value, total_loss.item()) + 
+            print('batch {}, time:{:.4f}, loss: {:.4f}, instance_loss: {:.4f}, weighted_loss: {:.4f}, '.format(batch_idx, duration, loss_value, instance_loss_value, total_loss.item()) + 
                 'label: {}, bag_size: {}'.format(label.item(), data.size(0)))
 
         error = calculate_error(Y_hat, label)
         train_error += error
         
         # backward pass
-        total_loss.backward()
+        # total_loss.backward()
+        scaler.scale(total_loss).backward()
         # step
-        optimizer.step()
-        optimizer.zero_grad()
+        # optimizer.step()
+        # optimizer.zero_grad()
+        scaler.step(optimizer)
+        scaler.update()
+        for param in model.parameters():
+            param.grad = None
 
     # calculate loss and error for epoch
     train_loss /= len(loader)
