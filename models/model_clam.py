@@ -279,8 +279,8 @@ class CLAM_MB(CLAM_SB):
         nn.Module.__init__(self)
         self.size_dict = {"small": [1024, 512, 256], "big": [1024, 512, 384]}
         size = self.size_dict[size_arg]
-        # fc = [nn.Linear(size[0], size[1]), nn.ReLU()]
-        fc = [nn.Linear(size[0], size[1]), nn.GeLU()]
+        fc = [nn.Linear(size[0], size[1]), nn.ReLU()]
+        # fc = [nn.Linear(size[0], size[1]), nn.GeLU()]
         if dropout:
             fc.append(nn.Dropout(0.25))
         if attn == 'gated':
