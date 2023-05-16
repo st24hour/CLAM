@@ -33,7 +33,12 @@ class SubsetSequentialSampler(Sampler):
 		return len(self.indices)
 
 def collate_MIL(batch):
-	img = torch.cat([item[0] for item in batch], dim = 0)
+	# for item in batch:
+		# print(item[0].size())
+		# print(item[0].unsqueeze_(0).size())
+
+	img = torch.cat([item[0].unsqueeze_(0) for item in batch], dim = 0)
+	# img = torch.cat([item[0] for item in batch], dim = 0)
 	label = torch.LongTensor([item[1] for item in batch])
 	return [img, label]
 
@@ -48,16 +53,17 @@ def get_simple_loader(dataset, batch_size=1, num_workers=1):
 	loader = DataLoader(dataset, batch_size=batch_size, sampler = sampler.SequentialSampler(dataset), collate_fn = collate_MIL, **kwargs)
 	return loader 
 
-def get_split_loader(split_dataset, training = False, testing = False, weighted = False):
+def get_split_loader(split_dataset, batch_size=128, training = False, testing = False, weighted = False):
 	"""
 		return either the validation loader or training loader 
 	"""
-	kwargs = {'num_workers': 4} if device.type == "cuda" else {}
+	kwargs = {'num_workers': 16} if device.type == "cuda" else {}
 	if not testing:
 		if training:
 			if weighted:
 				weights = make_weights_for_balanced_classes_split(split_dataset)
-				loader = DataLoader(split_dataset, batch_size=1, sampler = WeightedRandomSampler(weights, len(weights)), collate_fn = collate_MIL, **kwargs)	
+				loader = DataLoader(split_dataset, batch_size=batch_size, sampler = WeightedRandomSampler(weights, len(weights)), \
+									collate_fn = collate_MIL, **kwargs)	
 			else:
 				loader = DataLoader(split_dataset, batch_size=1, sampler = RandomSampler(split_dataset), collate_fn = collate_MIL, **kwargs)
 		else:

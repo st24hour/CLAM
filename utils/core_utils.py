@@ -29,15 +29,24 @@ class Accuracy_Logger(object):
         self.data[Y]["count"] += 1
         self.data[Y]["correct"] += (Y_hat == Y)
     
-    def log_batch(self, Y_hat, Y):
-        Y_hat = np.array(Y_hat).astype(int)
-        Y = np.array(Y).astype(int)
-        for label_class in np.unique(Y):
-            cls_mask = Y == label_class
+    def log_batch(self, Y_hat, Y):          # 문제 있음 -> 해결 (Y_hat.squeeze_(1))
+        # print(Y_hat.size())
+        # print(Y.size())
+        Y_hat = np.array(Y_hat.squeeze_(1).cpu()).astype(int)
+        Y = np.array(Y.cpu()).astype(int)
+        for label_class in np.unique(Y):    # 0,1
+            cls_mask = Y == label_class     # class 0 인거 다 mask
             self.data[label_class]["count"] += cls_mask.sum()
-            self.data[label_class]["correct"] += (Y_hat[cls_mask] == Y[cls_mask]).sum()
-    
-    def get_summary(self, c):
+            self.data[label_class]["correct"] += (Y_hat[cls_mask] == Y[cls_mask]).sum() 
+            # print(Y_hat[cls_mask] == Y[cls_mask])
+            # print(Y_hat)
+            # print(Y)
+            # print(cls_mask)
+            # print(Y_hat[cls_mask])
+            # print(Y[cls_mask])
+            # exit()
+
+    def get_summary(self, c):       # 이거도 문제 없는 듯
         count = self.data[c]["count"] 
         correct = self.data[c]["correct"]
         
@@ -171,7 +180,7 @@ def train(datasets, cur, args):
     print('Done!')
     
     print('\nInit Loaders...', end=' ')
-    train_loader = get_split_loader(train_split, training=True, testing = args.testing, weighted = args.weighted_sample)
+    train_loader = get_split_loader(train_split, args.batch_size, training=True, testing = args.testing, weighted = args.weighted_sample)
     val_loader = get_split_loader(val_split,  testing = args.testing)
     test_loader = get_split_loader(test_split, testing = args.testing)
     print('Done!')
@@ -245,7 +254,7 @@ def train_loop_clam(epoch, model, loader, optimizer, n_classes, bag_weight, writ
         # if data.dtype == torch.float16:
         #     data = data.to(torch.float32)#, label.to(torch.int32)
         # data = data.to(torch.float16)
-        # print(data.size())
+        print(data.size())
 
         with autocast(enabled=True):    
             logits, Y_prob, Y_hat, _, instance_dict = model(data, label=label, instance_eval=True)
@@ -322,13 +331,17 @@ def train_loop(epoch, model, loader, optimizer, n_classes, writer = None, loss_f
 
         logits, Y_prob, Y_hat, _, _ = model(data)
         
-        acc_logger.log(Y_hat, label)
+        # acc_logger.log(Y_hat, label)
+        acc_logger.log_batch(Y_hat, label)
+        # print(logits.size())
+        # print(label.size())
         loss = loss_fn(logits, label)
         loss_value = loss.item()
         
         train_loss += loss_value
         if (batch_idx + 1) % 20 == 0:
-            print('batch {}, loss: {:.4f}, label: {}, bag_size: {}'.format(batch_idx, loss_value, label.item(), data.size(0)))
+            # print('batch {}, loss: {:.4f}, label: {}, bag_size: {}'.format(batch_idx, loss_value, label.item(), data.size(0)))
+            print('batch {}, loss: {:.4f}'.format(batch_idx, loss_value))
            
         error = calculate_error(Y_hat, label)
         train_error += error
@@ -344,6 +357,7 @@ def train_loop(epoch, model, loader, optimizer, n_classes, writer = None, loss_f
     train_error /= len(loader)
 
     print('Epoch: {}, train_loss: {:.4f}, train_error: {:.4f}'.format(epoch, train_loss, train_error))
+    # 밑에 print 문제 있음
     for i in range(n_classes):
         acc, correct, count = acc_logger.get_summary(i)
         print('class {}: acc {}, correct {}/{}'.format(i, acc, correct, count))
@@ -531,6 +545,8 @@ def summary(model, loader, n_classes):
         with torch.no_grad():
             logits, Y_prob, Y_hat, _, _ = model(data)
 
+        # for i in range(len(label)):
+        #     acc_logger.log(Y_hat[i], label[i])
         acc_logger.log(Y_hat, label)
         probs = Y_prob.cpu().numpy()
         all_probs[batch_idx] = probs

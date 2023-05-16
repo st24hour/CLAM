@@ -51,7 +51,7 @@ def main(args):
     for i in folds:
         seed_torch(args.seed)
         train_dataset, val_dataset, test_dataset = dataset.return_splits(from_id=False, 
-                csv_path='{}/splits_{}.csv'.format(args.split_dir, i))
+                csv_path='{}/splits_{}.csv'.format(args.split_dir, i), num_patch=args.num_patch)
         
         datasets = (train_dataset, val_dataset, test_dataset)
         results, test_auc, val_auc, test_acc, val_acc  = train(datasets, i, args)
@@ -122,6 +122,8 @@ parser.add_argument('--bag_weight', type=float, default=0.7,
                     help='clam: weight coefficient for bag-level loss (default: 0.7)')
 parser.add_argument('--B', type=int, default=8, help='numbr of positive/negative patches to sample for clam')
 parser.add_argument('--attn', type=str, default="gated", help='type of attention')
+parser.add_argument('--num_patch', type=int, default=3000, help='numbr of patches per one slide')
+parser.add_argument('--batch_size', type=int, default=4, help='batch_size')
 args = parser.parse_args()
 # print(args.label_dict)
 # print(type(args.label_dict))
@@ -265,6 +267,7 @@ else:
 def change_permissions_recursive(path, mode=0o777):
     for root, dirs, files in os.walk(path, topdown=False):
         for dir in [os.path.join(root,d) for d in dirs]:
+            print(dir)
             os.chmod(dir, mode)
     for file in [os.path.join(root, f) for f in files]:
             os.chmod(file, mode)
@@ -285,7 +288,7 @@ while os.path.isdir(os.path.join(args.results_dir, str(args.exp_code) + '/' + hp
     i+=1
 args.results_dir = os.path.join(args.results_dir, str(args.exp_code) + '/' + hp_setting + f'_s{args.seed}_{str(i)}')
 os.makedirs(args.results_dir, exist_ok=True)
-change_permissions_recursive(args.results_dir+'/../')
+change_permissions_recursive(args.results_dir+'/../../')
 
 if args.split_dir is None:
     args.split_dir = os.path.join('splits', args.task+'_{}'.format(int(args.label_frac*100)))

@@ -31,7 +31,8 @@ def save_splits(split_datasets, column_keys, filename, boolean_style=False):
 
 class Generic_WSI_Classification_Dataset(Dataset):
 	def __init__(self,
-		csv_path = 'dataset_csv/ccrcc_clean.csv',
+		# csv_path = 'dataset_csv/ccrcc_clean.csv',
+		csv_path = None,
 		shuffle = False, 
 		seed = 7, 
 		print_info = True,
@@ -41,6 +42,7 @@ class Generic_WSI_Classification_Dataset(Dataset):
 		patient_strat=False,
 		label_col = None,
 		patient_voting = 'max',
+		num_patch: int = None
 		):
 		"""
 		Args:
@@ -51,6 +53,10 @@ class Generic_WSI_Classification_Dataset(Dataset):
 			label_dict (dict): Dictionary with key, value pairs for converting str labels to int
 			ignore (list): List containing class labels to ignore
 		"""
+		self.num_patch = num_patch
+		if csv_path is None:
+			return
+		
 		self.label_dict = label_dict
 		self.num_classes = len(set(self.label_dict.values()))
 		self.seed = seed
@@ -62,6 +68,7 @@ class Generic_WSI_Classification_Dataset(Dataset):
 			label_col = 'label'
 		self.label_col = label_col
 
+		# if os.path.isfile(csv_path):
 		slide_data = pd.read_csv(csv_path)
 		slide_data = self.filter_df(slide_data, filter_dict)
 		slide_data = self.df_prep(slide_data, self.label_dict, ignore, self.label_col)		# label을 숫자로 변경
@@ -185,15 +192,17 @@ class Generic_WSI_Classification_Dataset(Dataset):
 		else:
 			self.train_ids, self.val_ids, self.test_ids = ids
 
-	def get_split_from_df(self, all_splits, split_key='train'):
+	def get_split_from_df(self, all_splits, num_patch, split_key='train'):
 		split = all_splits[split_key]
 		split = split.dropna().reset_index(drop=True)
 
+		######################################################################################
 		if len(split) > 0:
 			mask = (self.slide_data['case_id']+'/'+self.slide_data['slide_id']).isin(split.tolist())
 			#mask = self.slide_data['slide_id'].isin(split.tolist())
 			df_slice = self.slide_data[mask].reset_index(drop=True)
-			split = Generic_Split(df_slice, data_dir=self.data_dir, num_classes=self.num_classes)
+			split = Generic_Split(df_slice, data_dir=self.data_dir, num_classes=self.num_classes, \
+			 					num_patch=num_patch)
 		else:
 			split = None
 		
@@ -216,7 +225,7 @@ class Generic_WSI_Classification_Dataset(Dataset):
 		return split
 
 
-	def return_splits(self, from_id=True, csv_path=None):
+	def return_splits(self, from_id=True, csv_path=None, num_patch=None):
 
 
 		if from_id:
@@ -241,13 +250,13 @@ class Generic_WSI_Classification_Dataset(Dataset):
 			else:
 				test_split = None
 			
-		
+		###################################################################
 		else:
 			assert csv_path 
 			all_splits = pd.read_csv(csv_path, dtype=self.slide_data['slide_id'].dtype)  # Without "dtype=self.slide_data['slide_id'].dtype", read_csv() will convert all-number columns to a numerical type. Even if we convert numerical columns back to objects later, we may lose zero-padding in the process; the columns must be correctly read in from the get-go. When we compare the individual train/val/test columns to self.slide_data['slide_id'] in the get_split_from_df() method, we cannot compare objects (strings) to numbers or even to incorrectly zero-padded objects/strings. An example of this breaking is shown in https://github.com/andrew-weisman/clam_analysis/tree/main/datatype_comparison_bug-2021-12-01.
-			train_split = self.get_split_from_df(all_splits, 'train')
-			val_split = self.get_split_from_df(all_splits, 'val')
-			test_split = self.get_split_from_df(all_splits, 'test')
+			train_split = self.get_split_from_df(all_splits, num_patch, 'train')
+			val_split = self.get_split_from_df(all_splits, num_patch, 'val')
+			test_split = self.get_split_from_df(all_splits, num_patch, 'test')
 			
 		return train_split, val_split, test_split
 
@@ -321,10 +330,12 @@ class Generic_MIL_Dataset(Generic_WSI_Classification_Dataset):
 	'''
 	def __init__(self,
 		data_dir, 
+		num_patch: int = None, 
 		**kwargs):
 	
-		super(Generic_MIL_Dataset, self).__init__(**kwargs)
+		super(Generic_MIL_Dataset, self).__init__(num_patch=num_patch, **kwargs)
 		self.data_dir = data_dir
+		self.num_patch = num_patch
 		self.use_h5 = False
 
 	def load_from_h5(self, toggle):
@@ -345,7 +356,13 @@ class Generic_MIL_Dataset(Generic_WSI_Classification_Dataset):
 				full_path = os.path.join(data_dir, 'pt_files','{}/{}.pt'.format(case_id, slide_id)).replace('.svs', '')
 				#full_path = os.path.join(data_dir, 'pt_files', '{}.pt'.format(slide_id))
 				features = torch.load(full_path)
-				return features, label
+				
+				# print(self.num_patch)
+				# print(type(self).__name__)
+				if self.num_patch is not None:
+					return features[torch.randint(len(features),(self.num_patch,))], label
+				else:	
+					return features, label
 			
 			else:
 				return slide_id, label
@@ -360,8 +377,11 @@ class Generic_MIL_Dataset(Generic_WSI_Classification_Dataset):
 			return features, label, coords
 
 
+
+
 class Generic_Split(Generic_MIL_Dataset):
-	def __init__(self, slide_data, data_dir=None, num_classes=2):
+	def __init__(self, slide_data, num_patch=None, data_dir=None, num_classes=2):
+		super(Generic_Split, self).__init__(data_dir, num_patch)
 		self.use_h5 = False
 		self.slide_data = slide_data
 		self.data_dir = data_dir

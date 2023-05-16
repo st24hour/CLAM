@@ -21,6 +21,7 @@ CUDA_VISIBLE_DEVICES=8 python main.py --drop_out \
                                     --inst_loss svm \
                                     --task task_2_tumor_subtyping \
                                     --model_type clam_sb \
+                                    --no_inst_cluster \
                                     --log_data \
                                     --data_root_dir $data_root_dir \
                                     --feature_folder $feature_folder \

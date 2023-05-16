@@ -228,11 +228,15 @@ class CLAM_SB(nn.Module):
     def forward(self, h, label=None, instance_eval=False, return_features=False, attention_only=False):
         device = h.device
         A, h = self.attention_net(h)  # Nx1 (N: slide당 patch 개수)
-        A = torch.transpose(A, 1, 0)  # Kx1
+        # print(A.size())               # (batch,N=num_patch,1)
+        # print(h.size())               # (batch,N=num_patch,512=inner_feature_dim)
+        # A = torch.transpose(A, 1, 0)  # 1xN
+        A = rearrange(A, 'b k 1 -> b 1 k')
         if attention_only:
             return A
         A_raw = A
-        A = F.softmax(A, dim=1)  # softmax over N
+        A = F.softmax(A, dim=2)  # softmax over N
+        # print(A.size())             # (batch,1,N=num_patch)
         # print(A.size())     # (1,N)
 
         if instance_eval:
@@ -259,9 +263,10 @@ class CLAM_SB(nn.Module):
             if self.subtyping:
                 total_inst_loss /= len(self.instance_classifiers)
                 
-        M = torch.mm(A, h) 
-        print(M.size())     # [1, 512]
-        logits = self.classifiers(M)
+        M = torch.matmul(A, h) 
+        # print(M.size())     # [batch,1,512]
+        # logits = self.classifiers(M)
+        logits = self.classifiers(M).squeeze(1)
         Y_hat = torch.topk(logits, 1, dim = 1)[1]
         Y_prob = F.softmax(logits, dim = 1)
         if instance_eval:
