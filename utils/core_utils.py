@@ -13,6 +13,10 @@ from torch.cuda.amp import GradScaler
 from torch.cuda.amp import autocast
 import time
 
+# JS
+from models.model_js import mlp_mixer_s0
+
+
 class Accuracy_Logger(object):
     """Accuracy logger"""
     def __init__(self, n_classes):
@@ -141,7 +145,7 @@ def train(datasets, cur, args):
     if args.model_size is not None and args.model_type != 'mil':
         model_dict.update({"size_arg": args.model_size})
     
-    if args.model_type in ['clam_sb', 'clam_mb']:
+    if args.model_type in ['clam_sb', 'clam_mb', 'mlp_mixer_s0']:
         if args.subtyping:
             model_dict.update({'subtyping': True})
         
@@ -160,6 +164,17 @@ def train(datasets, cur, args):
             model = CLAM_SB(**model_dict, instance_loss_fn=instance_loss_fn)
         elif args.model_type == 'clam_mb':
             model = CLAM_MB(**model_dict, instance_loss_fn=instance_loss_fn)
+        elif args.model_type == 'mlp_mixer_s0':
+            model = mlp_mixer_s0(
+                input_dim=1024, 
+                dim=args.dim, 
+                num_patches=args.num_patch, 
+                depth=args.depth, 
+                num_classes=2, 
+                expansion_factor_patch = args.expansion_factor_patch, 
+                expansion_factor = args.expansion_factor, 
+                dropout = args.drop_out
+            )
         else:
             raise NotImplementedError
     
@@ -180,7 +195,7 @@ def train(datasets, cur, args):
     print('Done!')
     
     print('\nInit Loaders...', end=' ')
-    train_loader = get_split_loader(train_split, args.batch_size, training=True, testing = args.testing, weighted = args.weighted_sample)
+    train_loader = get_split_loader(train_split, args.batch_size, training=True, testing = args.testing, weighted = args.weighted_sample, num_workers=args.num_workers)
     val_loader = get_split_loader(val_split,  testing = args.testing)
     test_loader = get_split_loader(test_split, testing = args.testing)
     print('Done!')
@@ -200,7 +215,8 @@ def train(datasets, cur, args):
             stop = validate_clam(cur, epoch, model, val_loader, args.n_classes, 
                 early_stopping, writer, loss_fn, args.results_dir)
         
-        else:
+        else:       
+            # mlp_mixer는 여기로
             train_loop(epoch, model, train_loader, optimizer, args.n_classes, writer, loss_fn)
             stop = validate(cur, epoch, model, val_loader, args.n_classes, 
                 early_stopping, writer, loss_fn, args.results_dir)
@@ -257,11 +273,12 @@ def train_loop_clam(epoch, model, loader, optimizer, n_classes, bag_weight, writ
         print(data.size())
 
         with autocast(enabled=True):    
-            logits, Y_prob, Y_hat, _, instance_dict = model(data, label=label, instance_eval=True)
+            logits, Y_prob, _, instance_dict = model(data, label=label, instance_eval=True)
             loss = loss_fn(logits, label)
             instance_loss = instance_dict['instance_loss']
             total_loss = bag_weight * loss + (1-bag_weight) * instance_loss 
-                
+
+        Y_hat = torch.topk(logits, 1, dim = 1)[1]        
         acc_logger.log(Y_hat, label)
         loss_value = loss.item()
         inst_count+=1
@@ -321,36 +338,54 @@ def train_loop_clam(epoch, model, loader, optimizer, n_classes, bag_weight, writ
 def train_loop(epoch, model, loader, optimizer, n_classes, writer = None, loss_fn = None):   
     device=torch.device("cuda" if torch.cuda.is_available() else "cpu") 
     model.train()
+    scaler = GradScaler()
     acc_logger = Accuracy_Logger(n_classes=n_classes)
     train_loss = 0.
     train_error = 0.
 
     print('\n')
+    end = time.time()   
     for batch_idx, (data, label) in enumerate(loader):
         data, label = data.to(device), label.to(device)
 
-        logits, Y_prob, Y_hat, _, _ = model(data)
+        with autocast(enabled=True):    
+            # logits, Y_prob, _, _ = model(data)
+            logits = model(data)
+            # print(logits.type())
+    
+            # print(logits.size())
+            # print(label.size())
+            loss = loss_fn(logits, label)
+            loss_value = loss.item()
         
+        Y_hat = torch.topk(logits, 1, dim = 1)[1]
         # acc_logger.log(Y_hat, label)
         acc_logger.log_batch(Y_hat, label)
-        # print(logits.size())
-        # print(label.size())
-        loss = loss_fn(logits, label)
-        loss_value = loss.item()
-        
-        train_loss += loss_value
-        if (batch_idx + 1) % 20 == 0:
-            # print('batch {}, loss: {:.4f}, label: {}, bag_size: {}'.format(batch_idx, loss_value, label.item(), data.size(0)))
-            print('batch {}, loss: {:.4f}'.format(batch_idx, loss_value))
-           
         error = calculate_error(Y_hat, label)
         train_error += error
         
+        # # backward pass
+        # loss.backward()
+        # # step
+        # optimizer.step()
+        # optimizer.zero_grad()
+
         # backward pass
-        loss.backward()
+        scaler.scale(loss).backward()
         # step
-        optimizer.step()
-        optimizer.zero_grad()
+        scaler.step(optimizer)
+        scaler.update()
+        for param in model.parameters():
+            param.grad = None
+
+        # measure elapsed time
+        duration = time.time() - end
+        end = time.time()
+
+        train_loss += loss_value
+        if (batch_idx + 1) % 20 == 0:
+            # print('batch {}, loss: {:.4f}, label: {}, bag_size: {}'.format(batch_idx, loss_value, label.item(), data.size(0)))
+            print('batch {}, loss: {:.4f}, time: {:.4f}'.format(batch_idx, loss_value, duration))
 
     # calculate loss and error for epoch
     train_loss /= len(loader)
@@ -386,8 +421,10 @@ def validate(cur, epoch, model, loader, n_classes, early_stopping = None, writer
             if data.dtype == torch.float16:
                 data = data.to(torch.float32)#, label.to(torch.int32)
 
-            logits, Y_prob, Y_hat, _, _ = model(data)
+            logits = model(data)
 
+            Y_prob = F.softmax(logits, dim = 1)
+            Y_hat = torch.topk(logits, 1, dim = 1)[1]
             acc_logger.log(Y_hat, label)
             
             loss = loss_fn(logits, label)
@@ -543,7 +580,10 @@ def summary(model, loader, n_classes):
                 
         slide_id = slide_ids.iloc[batch_idx]
         with torch.no_grad():
-            logits, Y_prob, Y_hat, _, _ = model(data)
+            logits = model(data)
+
+            Y_prob = F.softmax(logits, dim = 1)
+            Y_hat = torch.topk(logits, 1, dim = 1)[1]
 
         # for i in range(len(label)):
         #     acc_logger.log(Y_hat[i], label[i])

@@ -101,10 +101,11 @@ parser.add_argument('--log_data', action='store_true', default=False, help='log 
 parser.add_argument('--testing', action='store_true', default=False, help='debugging tool')
 parser.add_argument('--early_stopping', action='store_true', default=False, help='enable early stopping')
 parser.add_argument('--opt', type=str, choices = ['adam', 'sgd'], default='adam')
-parser.add_argument('--drop_out', action='store_true', default=False, help='enable dropout (p=0.25)')
+# parser.add_argument('--drop_out', action='store_true', default=False, help='enable dropout (p=0.25)')
+parser.add_argument('--drop_out', type=float, default=0., help='dropout probability(p=0.)')
 parser.add_argument('--bag_loss', type=str, choices=['svm', 'ce'], default='ce',
                      help='slide-level classification loss function (default: ce)')
-parser.add_argument('--model_type', type=str, choices=['clam_sb', 'clam_mb', 'mil'], default='clam_sb', 
+parser.add_argument('--model_type', type=str, choices=['clam_sb', 'clam_mb', 'mil', 'mlp_mixer_s0'], default='clam_sb', 
                     help='type of model (default: clam_sb, clam w/ single attention branch)')
 parser.add_argument('--exp_code', type=str, help='experiment code for saving results')
 parser.add_argument('--weighted_sample', action='store_true', default=False, help='enable weighted sampling')
@@ -124,6 +125,12 @@ parser.add_argument('--B', type=int, default=8, help='numbr of positive/negative
 parser.add_argument('--attn', type=str, default="gated", help='type of attention')
 parser.add_argument('--num_patch', type=int, default=3000, help='numbr of patches per one slide')
 parser.add_argument('--batch_size', type=int, default=4, help='batch_size')
+parser.add_argument('--num_workers', type=int, default=16, help='num_workers of dataloader')
+### MLP_mixer param
+parser.add_argument('--dim', type=int, default=1024, help='MLP_mixer feature inner dimension')
+parser.add_argument('--depth', type=int, default=10, help='MLP_mixer depth')
+parser.add_argument('--expansion_factor_patch', type=float, default=0.25, help='MLP_mixer patch mixer dimension')
+parser.add_argument('--expansion_factor', type=float, default=0.5, help='MLP_mixer feature mixer dimension')
 args = parser.parse_args()
 # print(args.label_dict)
 # print(type(args.label_dict))
@@ -267,7 +274,6 @@ else:
 def change_permissions_recursive(path, mode=0o777):
     for root, dirs, files in os.walk(path, topdown=False):
         for dir in [os.path.join(root,d) for d in dirs]:
-            print(dir)
             os.chmod(dir, mode)
     for file in [os.path.join(root, f) for f in files]:
             os.chmod(file, mode)
@@ -279,16 +285,22 @@ def change_permissions_recursive(path, mode=0o777):
 ##################################################################
 # 이하 전부 logging용 코드
 args.scheduler = None
-hp_setting = f'{args.attn}_{args.opt}_lr_{args.lr}_sch_{args.scheduler}_decay_{args.decay_epoch}\
-_wd_{args.reg}_epoch{args.max_epochs}_stop_{args.early_stopping}_drop_{args.drop_out}_B{args.B}\
-'.replace("[", "").replace("]", "").replace(",", "_").replace(" ", "")
+if 'mlp_mixer' in args.model_type:
+    hp_setting = f'{args.model_type}_batch_{args.batch_size}_work{args.num_workers}_patch_{args.num_patch}/\
+        {args.opt}_lr_{args.lr}_sch_{args.scheduler}_decay_{args.decay_epoch}_wd_{args.reg}_epoch{args.max_epochs}_\
+            dim_depth_ratio_{args.dim}_{args.depth}_{args.expansion_factor_patch}_{args.expansion_factor}_drop_{args.drop_out}'\
+                .replace("[", "").replace("]", "").replace(",", "_").replace(" ", "")
+else:  
+    hp_setting = f'{args.attn}_batch_{args.batch_size}_work{args.num_workers}_patch_{args.num_patch}/\
+        {args.opt}_lr_{args.lr}_sch_{args.scheduler}_decay_{args.decay_epoch}_wd_{args.reg}_epoch{args.max_epochs}\
+            _stop_{args.early_stopping}_drop_{args.drop_out}'.replace("[", "").replace("]", "").replace(",", "_").replace(" ", "")
 
 i=0
 while os.path.isdir(os.path.join(args.results_dir, str(args.exp_code) + '/' + hp_setting + f'_s{args.seed}_{str(i)}')):
     i+=1
 args.results_dir = os.path.join(args.results_dir, str(args.exp_code) + '/' + hp_setting + f'_s{args.seed}_{str(i)}')
 os.makedirs(args.results_dir, exist_ok=True)
-change_permissions_recursive(args.results_dir+'/../../')
+change_permissions_recursive(args.results_dir+'/../../../')
 
 if args.split_dir is None:
     args.split_dir = os.path.join('splits', args.task+'_{}'.format(int(args.label_frac*100)))

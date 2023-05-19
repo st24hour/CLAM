@@ -359,8 +359,20 @@ class Generic_MIL_Dataset(Generic_WSI_Classification_Dataset):
 				
 				# print(self.num_patch)
 				# print(type(self).__name__)
+				total_patch = features.size(0)
+				if self.num_patch >= total_patch:	# patch를 임의로 여러 번 뽑아서 augmentation 해야됨	
+					# num_patch: 네트워크에 들어가는 patch수, total_patch: 각 slide마다의 patch수
+
+					num_repeats = int(np.ceil(self.num_patch / total_patch))  # 중복되는 횟수 계산
+					repeated_numbers = np.repeat(np.arange(0, total_patch), num_repeats)  # 중복되는 수 만들기
+					augmented_patch = np.random.choice(repeated_numbers, self.num_patch, replace=False)  # 중복되는 수 중에서 선택
+				else:								# 전체 patch 중에서 num_patch 개수만큼 비복원 random sampling 
+					augmented_patch = np.random.choice(np.arange(0, total_patch), self.num_patch, replace=False)
+				np.random.shuffle(augmented_patch)
+
 				if self.num_patch is not None:
-					return features[torch.randint(len(features),(self.num_patch,))], label
+					# return features[torch.randint(len(features),(self.num_patch,))], label
+					return features[augmented_patch], label
 				else:	
 					return features, label
 			

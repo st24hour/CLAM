@@ -1,16 +1,17 @@
 # GPU 2, 10
 
-##################################### 230430 ######################################
+##################################### 230519 ######################################
 exp_code='task_2_tumor_typing_only_major_two_CLAM_100'
 data_root_dir='/shared/js.yun/data/CLAM_data/'
 feature_folder='TCGA-breast-features'
 results_dir='/shared/js.yun/logs/CLAM/TCGA-breast-results/'
+# results_dir='/shared/js.yun/logs/CLAM/temp/'
 split_dir='/shared/js.yun/data/CLAM_data/TCGA-breast-splits-tumor-major-two/task_2_tumor_subtyping_100/'
 csv_path='/shared/js.yun/CLAM/dataset_csv/TCGA-breast-tumor-major-two.csv'
 label_dict='{"Infiltrating Ductal Carcinoma":0,"Infiltrating Lobular Carcinoma":1}'
 
-CUDA_VISIBLE_DEVICES=10 python main.py --drop_out \
-                                    --lr 0.01 \
+CUDA_VISIBLE_DEVICES=10 python main.py --drop_out 0. \
+                                    --lr 0.001 \
                                     --k 10 \
                                     --label_frac 1 \
                                     --exp_code $exp_code \
@@ -18,7 +19,8 @@ CUDA_VISIBLE_DEVICES=10 python main.py --drop_out \
                                     --bag_loss ce \
                                     --inst_loss svm \
                                     --task task_2_tumor_subtyping \
-                                    --model_type clam_mb \
+                                    --model_type mlp_mixer_s0 \
+                                    --no_inst_cluster \
                                     --log_data \
                                     --data_root_dir $data_root_dir \
                                     --feature_folder $feature_folder \
@@ -26,10 +28,86 @@ CUDA_VISIBLE_DEVICES=10 python main.py --drop_out \
                                     --split_dir $split_dir \
                                     --csv_path $csv_path \
                                     --subtyping \
-                                    --opt sgd \
-                                    --decay_epoch 100 150 \
+                                    --opt adam \
+                                    --decay_epoch 300 1000 \
                                     --max_epochs 200 \
-                                    --label_dict "$label_dict"
+                                    --label_dict "$label_dict" \
+                                    --num_patch 5000 \
+                                    --batch_size 16 \
+                                    --num_workers 16 \
+                                    --dim 1024 \
+                                    --depth 5 \
+                                    --expansion_factor_patch 1 \
+                                    --expansion_factor 0.5
+
+
+##################################### 230516 ######################################
+# exp_code='task_2_tumor_typing_only_major_two_CLAM_100'
+# data_root_dir='/shared/js.yun/data/CLAM_data/'
+# feature_folder='TCGA-breast-features'
+# results_dir='/shared/js.yun/logs/CLAM/TCGA-breast-results/'
+# # results_dir='/shared/js.yun/logs/CLAM/temp/'
+# split_dir='/shared/js.yun/data/CLAM_data/TCGA-breast-splits-tumor-major-two/task_2_tumor_subtyping_100/'
+# csv_path='/shared/js.yun/CLAM/dataset_csv/TCGA-breast-tumor-major-two.csv'
+# label_dict='{"Infiltrating Ductal Carcinoma":0,"Infiltrating Lobular Carcinoma":1}'
+
+# CUDA_VISIBLE_DEVICES=10 python main.py --drop_out \
+#                                     --lr 2e-4 \
+#                                     --k 10 \
+#                                     --label_frac 1 \
+#                                     --exp_code $exp_code \
+#                                     --weighted_sample \
+#                                     --bag_loss ce \
+#                                     --inst_loss svm \
+#                                     --task task_2_tumor_subtyping \
+#                                     --model_type clam_sb \
+#                                     --no_inst_cluster \
+#                                     --log_data \
+#                                     --data_root_dir $data_root_dir \
+#                                     --feature_folder $feature_folder \
+#                                     --results_dir $results_dir \
+#                                     --split_dir $split_dir \
+#                                     --csv_path $csv_path \
+#                                     --subtyping \
+#                                     --opt adam \
+#                                     --decay_epoch 300 1000 \
+#                                     --max_epochs 200 \
+#                                     --label_dict "$label_dict" \
+#                                     --num_patch 6000 \
+#                                     --batch_size 16 \
+#                                     --num_workers 16 
+
+
+##################################### 230430 ######################################
+# exp_code='task_2_tumor_typing_only_major_two_CLAM_100'
+# data_root_dir='/shared/js.yun/data/CLAM_data/'
+# feature_folder='TCGA-breast-features'
+# results_dir='/shared/js.yun/logs/CLAM/TCGA-breast-results/'
+# split_dir='/shared/js.yun/data/CLAM_data/TCGA-breast-splits-tumor-major-two/task_2_tumor_subtyping_100/'
+# csv_path='/shared/js.yun/CLAM/dataset_csv/TCGA-breast-tumor-major-two.csv'
+# label_dict='{"Infiltrating Ductal Carcinoma":0,"Infiltrating Lobular Carcinoma":1}'
+
+# CUDA_VISIBLE_DEVICES=10 python main.py --drop_out \
+#                                     --lr 0.01 \
+#                                     --k 10 \
+#                                     --label_frac 1 \
+#                                     --exp_code $exp_code \
+#                                     --weighted_sample \
+#                                     --bag_loss ce \
+#                                     --inst_loss svm \
+#                                     --task task_2_tumor_subtyping \
+#                                     --model_type clam_mb \
+#                                     --log_data \
+#                                     --data_root_dir $data_root_dir \
+#                                     --feature_folder $feature_folder \
+#                                     --results_dir $results_dir \
+#                                     --split_dir $split_dir \
+#                                     --csv_path $csv_path \
+#                                     --subtyping \
+#                                     --opt sgd \
+#                                     --decay_epoch 100 150 \
+#                                     --max_epochs 200 \
+#                                     --label_dict "$label_dict"
 
 
 
