@@ -1,6 +1,6 @@
 # GPU 3, 11
 
-##################################### 230519 ######################################
+##################################### 230531 ######################################
 exp_code='task_2_tumor_typing_only_major_two_CLAM_100'
 data_root_dir='/shared/js.yun/data/CLAM_data/'
 feature_folder='TCGA-breast-features'
@@ -10,8 +10,10 @@ split_dir='/shared/js.yun/data/CLAM_data/TCGA-breast-splits-tumor-major-two/task
 csv_path='/shared/js.yun/CLAM/dataset_csv/TCGA-breast-tumor-major-two.csv'
 label_dict='{"Infiltrating Ductal Carcinoma":0,"Infiltrating Lobular Carcinoma":1}'
 
-CUDA_VISIBLE_DEVICES=11 python main.py --drop_out 0. \
+CUDA_VISIBLE_DEVICES=11 python main.py --drop_out 0 \
                                     --lr 0.001 \
+                                    --reg 0.0001 \
+                                    --scheduler None \
                                     --k 10 \
                                     --label_frac 1 \
                                     --exp_code $exp_code \
@@ -30,15 +32,55 @@ CUDA_VISIBLE_DEVICES=11 python main.py --drop_out 0. \
                                     --subtyping \
                                     --opt adam \
                                     --decay_epoch 300 1000 \
-                                    --max_epochs 200 \
+                                    --max_epochs 100 \
                                     --label_dict "$label_dict" \
                                     --num_patch 5000 \
                                     --batch_size 16 \
                                     --num_workers 16 \
                                     --dim 1024 \
-                                    --depth 10 \
-                                    --expansion_factor_patch 0.25 \
-                                    --expansion_factor 0.5
+                                    --depth 2 \
+                                    --expansion_factor_patch 1 \
+                                    --expansion_factor 4
+                                    
+##################################### 230519 ######################################
+# exp_code='task_2_tumor_typing_only_major_two_CLAM_100'
+# data_root_dir='/shared/js.yun/data/CLAM_data/'
+# feature_folder='TCGA-breast-features'
+# results_dir='/shared/js.yun/logs/CLAM/TCGA-breast-results/'
+# # results_dir='/shared/js.yun/logs/CLAM/temp/'
+# split_dir='/shared/js.yun/data/CLAM_data/TCGA-breast-splits-tumor-major-two/task_2_tumor_subtyping_100/'
+# csv_path='/shared/js.yun/CLAM/dataset_csv/TCGA-breast-tumor-major-two.csv'
+# label_dict='{"Infiltrating Ductal Carcinoma":0,"Infiltrating Lobular Carcinoma":1}'
+
+# CUDA_VISIBLE_DEVICES=11 python main.py --drop_out 0. \
+#                                     --lr 0.001 \
+#                                     --k 10 \
+#                                     --label_frac 1 \
+#                                     --exp_code $exp_code \
+#                                     --weighted_sample \
+#                                     --bag_loss ce \
+#                                     --inst_loss svm \
+#                                     --task task_2_tumor_subtyping \
+#                                     --model_type mlp_mixer_s0 \
+#                                     --no_inst_cluster \
+#                                     --log_data \
+#                                     --data_root_dir $data_root_dir \
+#                                     --feature_folder $feature_folder \
+#                                     --results_dir $results_dir \
+#                                     --split_dir $split_dir \
+#                                     --csv_path $csv_path \
+#                                     --subtyping \
+#                                     --opt adam \
+#                                     --decay_epoch 300 1000 \
+#                                     --max_epochs 200 \
+#                                     --label_dict "$label_dict" \
+#                                     --num_patch 5000 \
+#                                     --batch_size 16 \
+#                                     --num_workers 16 \
+#                                     --dim 1024 \
+#                                     --depth 10 \
+#                                     --expansion_factor_patch 0.25 \
+#                                     --expansion_factor 0.5
 
 
 ##################################### 230516 ######################################

@@ -66,6 +66,7 @@ def initialize_df(slides, seg_params, filter_params, vis_params, patch_params,
 			'y2': np.empty((total)).fill(np.NaN)})
 
 
+	# default로는 slide None이므로 실행 안됨
 	if isinstance(slides, pd.DataFrame):
 		temp_copy = pd.DataFrame(default_df_dict) # temporary dataframe w/ default params
 		# find key in provided df

@@ -191,7 +191,11 @@ def train(datasets, cur, args):
 
     print('\nInit optimizer ...', end=' ')
     optimizer = get_optim(model, args)
-    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.decay_epoch, gamma=0.1)
+    if args.scheduler in ['None', 'step']:
+        scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.decay_epoch, gamma=0.1)
+    elif args.scheduler == 'cosine':
+        # epoch마다 lr을 조절하지만 일단 대략적인 성능 평가만 해보기 위해서 구현하였음
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.max_epochs)
     print('Done!')
     
     print('\nInit Loaders...', end=' ')

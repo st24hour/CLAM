@@ -80,6 +80,8 @@ parser.add_argument('--max_epochs', type=int, default=200,
                     help='maximum number of epochs to train (default: 200)')
 parser.add_argument('--lr', type=float, default=1e-4,
                     help='learning rate (default: 0.0001)')
+parser.add_argument('--scheduler', type=str, default='None',
+                    help='learning rate scheduler')
 parser.add_argument('--decay_epoch', type=int, nargs='+', default=[150,225], 
                         help='Learning Rate Decay Steps')
 parser.add_argument('--label_frac', type=float, default=1.0,
@@ -284,7 +286,7 @@ def change_permissions_recursive(path, mode=0o777):
 
 ##################################################################
 # 이하 전부 logging용 코드
-args.scheduler = None
+# args.scheduler = None
 if 'mlp_mixer' in args.model_type:
     hp_setting = f'{args.model_type}_batch_{args.batch_size}_work{args.num_workers}_patch_{args.num_patch}/\
         {args.opt}_lr_{args.lr}_sch_{args.scheduler}_decay_{args.decay_epoch}_wd_{args.reg}_epoch{args.max_epochs}_\

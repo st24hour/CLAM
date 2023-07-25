@@ -5,6 +5,7 @@ import pandas as pd
 from datasets.dataset_generic import Generic_WSI_Classification_Dataset, Generic_MIL_Dataset, save_splits
 import argparse
 import numpy as np
+import json
 
 parser = argparse.ArgumentParser(description='Creating splits for whole slide classification')
 parser.add_argument('--label_frac', type=float, default= 1.0,
@@ -19,8 +20,9 @@ parser.add_argument('--val_frac', type=float, default= 0.1,
                     help='fraction of labels for validation (default: 0.1)')
 parser.add_argument('--test_frac', type=float, default= 0.1,
                     help='fraction of labels for test (default: 0.1)')
-parser.add_argument('--n_class', type=int, default=3,
+parser.add_argument('--n_class', type=int, default=2,
                     help='num class')
+parser.add_argument('--label_dict', type=json.loads, default= '{"LUSC":0, "LUAD":1}')
 parser.add_argument('--csv_path', type=str, default='/shared/j.jang/pathai/CLAM/dataset_csv/TCGA-lung.csv',
                     help='csv file path')
 parser.add_argument('--split_dir', type=str, default='/shared/js.yun/data/CLAM_data/TCGA-lung-splits/',
@@ -32,7 +34,7 @@ args = parser.parse_args()
 ###
 # args.label_frac = 1.0
 # args.task = 'task_2_tumor_subtyping'
-args.label_dict = {'LUSC':0, 'LUAD':1}
+# args.label_dict = {'LUSC':0, 'LUAD':1}
 #args.label_dict = {'BRCA_Basal':0, 'BRCA_Her2':1, 'BRCA_LumA':2, 'BRCA_LumB':3, 'BRCA_Normal':4, 'Others':5}
 #args.label_dict = {'BRCA_Basal':0, 'BRCA_Her2':1, 'BRCA_LumA':2, 'BRCA_LumB':3, 'Others':4}
 #args.label_dict = {'Metaplastic Breast Cancer':0, 'Breast Invasive Mixed Mucinous Carcinoma':1,'Breast Invasive Lobular Carcinoma':2,'Breast Invasive Ductal Carcinoma':3,'Breast Invasive Carcinoma (NOS)':4}
@@ -48,8 +50,10 @@ args.label_dict = {'LUSC':0, 'LUAD':1}
 # args.split_dir = '/shared/j.jang/pathai/data/TCGA-breast-splits-tumor-major-two/'
 ###
 
+# 한 환자의 slide가 2개 이상 있는 경우가 없으면 task1이나 task2나 똑같음
 if args.task == 'task_1_tumor_vs_normal':
     args.n_classes=2
+    # patient_strat=True로 두면 같은 환자의 데이터가 서로 다른 slide에 있으면 train/val/test에 같이 들어가도록 하는거 같음 (확인필요)
     dataset = Generic_WSI_Classification_Dataset(csv_path = args.csv_path,
                             shuffle = False, 
                             seed = args.seed, 
@@ -72,7 +76,7 @@ elif args.task == 'task_2_tumor_subtyping':
 else:
     raise NotImplementedError
 
-num_slides_cls = np.array([len(cls_ids) for cls_ids in dataset.patient_cls_ids])
+num_slides_cls = np.array([len(cls_ids) for cls_ids in dataset.patient_cls_ids])    # [0번 class 개수, 1번 class 개수, ...]
 val_num = np.round(num_slides_cls * args.val_frac).astype(int)
 test_num = np.round(num_slides_cls * args.test_frac).astype(int)
 
@@ -87,9 +91,9 @@ if __name__ == '__main__':
         os.makedirs(split_dir, exist_ok=True)
         dataset.create_splits(k = args.k, val_num = val_num, test_num = test_num, label_frac=lf)
         for i in range(args.k):
-            dataset.set_splits()
-            descriptor_df = dataset.test_split_gen(return_descriptor=True)
-            splits = dataset.return_splits(from_id=True)
+            dataset.set_splits()        # self.train_ids, self.val_ids, self.test_ids에 train/val/test slide index가 저장 됨
+            descriptor_df = dataset.test_split_gen(return_descriptor=True)      # 각 class 마다 train/val/test 개수적힌 df
+            splits = dataset.return_splits(from_id=True)        # Generic_Split instance 가 3개 나옴
             save_splits(splits, ['train', 'val', 'test'], os.path.join(split_dir, 'splits_{}.csv'.format(i)))
             save_splits(splits, ['train', 'val', 'test'], os.path.join(split_dir, 'splits_{}_bool.csv'.format(i)), boolean_style=True)
             descriptor_df.to_csv(os.path.join(split_dir, 'splits_{}_descriptor.csv'.format(i)))

@@ -15,12 +15,14 @@ import h5py
 from utils.utils import generate_split, nth
 
 def save_splits(split_datasets, column_keys, filename, boolean_style=False):
+	# print(len(split_datasets))		# 3 
 	splits = [split_datasets[i].slide_data['case_id']+'/'+split_datasets[i].slide_data['slide_id'] for i in range(len(split_datasets))]
+
 	if not boolean_style:
-		df = pd.concat(splits, ignore_index=True, axis=1)
-		df.columns = column_keys
+		df = pd.concat(splits, ignore_index=True, axis=1)		# 엑셀 오른쪽 열에다가 붙임
+		df.columns = column_keys		# ['train', 'val', 'test']
 	else:
-		df = pd.concat(splits, ignore_index = True, axis=0)
+		df = pd.concat(splits, ignore_index = True, axis=0)		# 엑셀 밑에 행에다가 붙임
 		index = df.values.tolist()
 		one_hot = np.eye(len(split_datasets)).astype(bool)
 		bool_array = np.repeat(one_hot, [len(dset) for dset in split_datasets], axis=0)
@@ -31,6 +33,7 @@ def save_splits(split_datasets, column_keys, filename, boolean_style=False):
 
 class Generic_WSI_Classification_Dataset(Dataset):
 	def __init__(self,
+		# 여기서 csv_path는 dataset_CSV 폴더에 있는 case_id, slide_id, label 있는 파일임  
 		# csv_path = 'dataset_csv/ccrcc_clean.csv',
 		csv_path = None,
 		shuffle = False, 
@@ -96,7 +99,10 @@ class Generic_WSI_Classification_Dataset(Dataset):
 		self.slide_cls_ids = [[] for i in range(self.num_classes)]
 		for i in range(self.num_classes):
 			self.slide_cls_ids[i] = np.where(self.slide_data['label'] == i)[0]
+		# print(self.slide_cls_ids)	# [0,1,2,....,n=num_class0], [n+1,n+2,....,n+num_class1]
 
+	# slide_data는 한 환자가 여러 개의 slide images와 label을 가지고 있을 수 있음.
+	# patient_data는 환자 별로 하나의 label을 가짐
 	def patient_data_prep(self, patient_voting='max'):
 		patients = np.unique(np.array(self.slide_data['case_id'])) # get unique patients
 		patient_labels = []
@@ -107,7 +113,7 @@ class Generic_WSI_Classification_Dataset(Dataset):
 			label = self.slide_data['label'][locations].values
 			if patient_voting == 'max':
 				label = label.max() # get patient label (MIL convention)
-			elif patient_voting == 'maj':
+			elif patient_voting == 'maj':	# most common value로 label 정하는 듯
 				label = stats.mode(label)[0]
 			else:
 				raise NotImplementedError
@@ -129,8 +135,14 @@ class Generic_WSI_Classification_Dataset(Dataset):
 		return data
 
 	def filter_df(self, df, filter_dict={}):
-		if len(filter_dict) > 0:
-			filter_mask = np.full(len(df), True, bool)
+		assert 'label' in df.keys()
+		# pd.options.display.max_rows = 1000		
+		# print(df['label'].isnull())
+		num_label_NaN = df['label'].isnull().values.sum()
+		print(f'{num_label_NaN} NaN label removed') 
+		if len(filter_dict) > 0 or df['label'].isnull().values.any():
+			df = df.dropna(subset=['label'], inplace=False).reset_index(drop=True)
+			filter_mask = np.full(len(df), True, bool)		# 전부 True
 			# assert 'label' not in filter_dict.keys()
 			for key, val in filter_dict.items():
 				mask = df[key].isin(val)
@@ -169,6 +181,7 @@ class Generic_WSI_Classification_Dataset(Dataset):
 		else:
 			settings.update({'cls_ids' : self.slide_cls_ids, 'samples': len(self.slide_data)})
 
+		# 부를떄마다 yield sampled_train_ids, all_val_ids, all_test_ids
 		self.split_gen = generate_split(**settings)
 
 	def set_splits(self,start_from=None):
@@ -179,13 +192,15 @@ class Generic_WSI_Classification_Dataset(Dataset):
 			ids = next(self.split_gen)
 
 		if self.patient_strat:
-			slide_ids = [[] for i in range(len(ids))] 
+			slide_ids = [[] for i in range(len(ids))] 	# train/val/test 3개 [[][][]]
 
-			for split in range(len(ids)): 
-				for idx in ids[split]:
+			for split in range(len(ids)): 	# 0,1,2
+				# ampled_train_ids, all_val_ids, all_test_ids 순서로 불러옴. patient_data에서 순서 index 적혀있는 list임
+				for idx in ids[split]:		
 					case_id = self.patient_data['case_id'][idx]
 					slide_indices = self.slide_data[self.slide_data['case_id'] == case_id].index.tolist()
-					slide_ids[split].extend(slide_indices)
+					# patient_data(환자수)로 train/val/test 뽑은 다음 실제 list는 slide_ids로 해서 비율이 조금 달라지긴 함
+					slide_ids[split].extend(slide_indices)		
 
 			self.train_ids, self.val_ids, self.test_ids = slide_ids[0], slide_ids[1], slide_ids[2]
 
@@ -227,10 +242,10 @@ class Generic_WSI_Classification_Dataset(Dataset):
 
 	def return_splits(self, from_id=True, csv_path=None, num_patch=None):
 
-
+		# main에서는 안쓰고 처음 data split 만들 떄 씀
 		if from_id:
 			if len(self.train_ids) > 0:
-				train_data = self.slide_data.loc[self.train_ids].reset_index(drop=True)
+				train_data = self.slide_data.loc[self.train_ids].reset_index(drop=True)			# train만 뽑아낸 dataframe 형태임
 				train_split = Generic_Split(train_data, data_dir=self.data_dir, num_classes=self.num_classes)
 
 			else:
@@ -253,6 +268,7 @@ class Generic_WSI_Classification_Dataset(Dataset):
 		###################################################################
 		else:
 			assert csv_path 
+			# 여기서의 csv_path는 splits_0.csv과 같이 split 나눈 파일임
 			all_splits = pd.read_csv(csv_path, dtype=self.slide_data['slide_id'].dtype)  # Without "dtype=self.slide_data['slide_id'].dtype", read_csv() will convert all-number columns to a numerical type. Even if we convert numerical columns back to objects later, we may lose zero-padding in the process; the columns must be correctly read in from the get-go. When we compare the individual train/val/test columns to self.slide_data['slide_id'] in the get_split_from_df() method, we cannot compare objects (strings) to numbers or even to incorrectly zero-padded objects/strings. An example of this breaking is shown in https://github.com/andrew-weisman/clam_analysis/tree/main/datatype_comparison_bug-2021-12-01.
 			train_split = self.get_split_from_df(all_splits, num_patch, 'train')
 			val_split = self.get_split_from_df(all_splits, num_patch, 'val')
@@ -272,19 +288,20 @@ class Generic_WSI_Classification_Dataset(Dataset):
 	def test_split_gen(self, return_descriptor=False):
 
 		if return_descriptor:
-			index = [list(self.label_dict.keys())[list(self.label_dict.values()).index(i)] for i in range(self.num_classes)]
+			index = [list(self.label_dict.keys())[list(self.label_dict.values()).index(i)] for i in range(self.num_classes)] # ['LUSC', 'LUAD']
 			columns = ['train', 'val', 'test']
 			df = pd.DataFrame(np.full((len(index), len(columns)), 0, dtype=np.int32), index= index,
 							columns= columns)
+			# print(df)	 	# [[0,0][0,0]]
 
-		count = len(self.train_ids)
+		count = len(self.train_ids)		# train_ids는 training set으로 뽑힌 index list
 		print('\nnumber of training samples: {}'.format(count))
 		labels = self.getlabel(self.train_ids)
 		unique, counts = np.unique(labels, return_counts=True)
 		for u in range(len(unique)):
 			print('number of samples in cls {}: {}'.format(unique[u], counts[u]))
 			if return_descriptor:
-				df.loc[index[u], 'train'] = counts[u]
+				df.loc[index[u], 'train'] = counts[u]	# 각 class마다 train/val/test 개수 몇 개 인지 기록
 		
 		count = len(self.val_ids)
 		print('\nnumber of val samples: {}'.format(count))
@@ -351,7 +368,7 @@ class Generic_MIL_Dataset(Generic_WSI_Classification_Dataset):
 		else:
 			data_dir = self.data_dir
 
-		if not self.use_h5:
+		if not self.use_h5:		# CLAM에서는 use_h5 = False
 			if self.data_dir:
 				full_path = os.path.join(data_dir, 'pt_files','{}/{}.pt'.format(case_id, slide_id)).replace('.svs', '')
 				#full_path = os.path.join(data_dir, 'pt_files', '{}.pt'.format(slide_id))

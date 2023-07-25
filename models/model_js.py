@@ -35,15 +35,7 @@ class FeedForward(nn.Module):
 
     def forward(self, x):
         return self.net(x)
-# def FeedForward(dim, expansion_factor = 4, dropout = 0., dense = nn.Linear):
-#     inner_dim = int(dim * expansion_factor)
-#     return nn.Sequential(
-#         dense(dim, inner_dim),
-#         nn.GELU(),
-#         nn.Dropout(dropout),
-#         dense(inner_dim, dim),
-#         nn.Dropout(dropout)
-#     )
+    
 
 class MLP_mixer(nn.Module):
     def __init__(self, input_dim, dim, num_patches, depth, num_classes, expansion_factor_patch = 0.25, expansion_factor = 0.5, dropout = 0.):
