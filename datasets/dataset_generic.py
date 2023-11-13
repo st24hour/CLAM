@@ -15,7 +15,13 @@ import h5py
 from utils.utils import generate_split, nth
 
 def save_splits(split_datasets, column_keys, filename, boolean_style=False):
+	'''
+	return_splits에 있는 Generic_Split class에 있어야 하는 것들:
+        self.slide_data
+    '''
+	##########################################################################################
 	splits = [split_datasets[i].slide_data['case_id']+'/'+split_datasets[i].slide_data['slide_id'] for i in range(len(split_datasets))]
+	# splits = [split_datasets[i].slide_data['slide_id'] for i in range(len(split_datasets))]		# HIPT data만 쓰는 경우 
 	if not boolean_style:
 		df = pd.concat(splits, ignore_index=True, axis=1)
 		df.columns = column_keys
@@ -75,6 +81,7 @@ class Generic_WSI_Classification_Dataset(Dataset):
 
 		self.patient_data_prep(patient_voting)		# self.patient_data = {'case_id':patients, 'label':np.array(patient_labels)} 만듦
 		self.cls_ids_prep()							# self.patient_cls_ids, self.slide_cls_ids
+		# 이 위에서 문제 생김
 
 		if print_info:
 			self.summarize()						# print
@@ -121,6 +128,13 @@ class Generic_WSI_Classification_Dataset(Dataset):
 			data.at[i, 'label'] = label_dict[key]		# label을 subtype 이름에서 숫자로 변경
 		return data
 
+	@staticmethod
+	def df_prep2(data, label_dict, ignore, label_col):
+		for i in data.index:
+			key = data.loc[i, label_col]
+			data.at[i, label_col] = label_dict[key]		# label을 subtype 이름에서 숫자로 변경
+		return data
+	
 	def filter_df(self, df, filter_dict={}):
 		if len(filter_dict) > 0:
 			filter_mask = np.full(len(df), True, bool)
@@ -150,7 +164,7 @@ class Generic_WSI_Classification_Dataset(Dataset):
 	def create_splits(self, k = 3, val_num = (25, 25), test_num = (40, 40), label_frac = 1.0, custom_test_ids = None):
 		settings = {
 					'n_splits' : k, 
-					'val_num' : val_num, 
+					'val_num' : val_num,        # class 별로 몇 개인지 list 형태로
 					'test_num': test_num,
 					'label_frac': label_frac,
 					'seed': self.seed,
@@ -160,6 +174,7 @@ class Generic_WSI_Classification_Dataset(Dataset):
 		if self.patient_strat:
 			settings.update({'cls_ids' : self.patient_cls_ids, 'samples': len(self.patient_data['case_id'])})
 		else:
+			# self.slide_cls_id에는 []
 			settings.update({'cls_ids' : self.slide_cls_ids, 'samples': len(self.slide_data)})
 
 		self.split_gen = generate_split(**settings)
@@ -190,8 +205,10 @@ class Generic_WSI_Classification_Dataset(Dataset):
 		split = split.dropna().reset_index(drop=True)
 
 		if len(split) > 0:
-			mask = (self.slide_data['case_id']+'/'+self.slide_data['slide_id']).isin(split.tolist())
-			#mask = self.slide_data['slide_id'].isin(split.tolist())
+			###################################################################################################
+			# HIIP feature만 쓸때 여기 수정
+			mask = (self.slide_data['case_id']+'/'+self.slide_data['slide_id']).isin(split.tolist())      # clam  
+			# mask = self.slide_data['slide_id'].isin(split.tolist())                     # HIPT에서 뽑은 feature 쓸때
 			df_slice = self.slide_data[mask].reset_index(drop=True)
 			split = Generic_Split(df_slice, data_dir=self.data_dir, num_classes=self.num_classes)
 		else:
@@ -342,8 +359,11 @@ class Generic_MIL_Dataset(Generic_WSI_Classification_Dataset):
 
 		if not self.use_h5:
 			if self.data_dir:
-				full_path = os.path.join(data_dir, 'pt_files','{}/{}.pt'.format(case_id, slide_id)).replace('.svs', '')
-				#full_path = os.path.join(data_dir, 'pt_files', '{}.pt'.format(slide_id))
+				########################################################################################################
+				# HIPT feature 쓸때 여기 바꿔야됨
+				# full_path = os.path.join(data_dir, 'pt_files', '{}.pt'.format(slide_id))	# 이게 원래 CLAM 인듯?
+				full_path = os.path.join(data_dir, 'pt_files','{}/{}.pt'.format(case_id, slide_id)).replace('.svs', '') # 종성님 CLAM - 이 방식으로 해야됨
+				# full_path = os.path.join(data_dir, '{}.pt'.format(slide_id)).replace('.svs', '')	# HIPT feature만
 				features = torch.load(full_path)
 				return features, label
 			
@@ -375,3 +395,156 @@ class Generic_Split(Generic_MIL_Dataset):
 		
 
 
+
+
+
+class Generic_Multi_Task_WSI_Dataset(Generic_WSI_Classification_Dataset):       # Generic_WSI_Classification_Dataset
+    def __init__(self, 
+                    csv_path,
+                    shuffle = False, 
+                    seed = 7, 
+					print_info = True,
+                    label_dict = {},
+                    label_dict2 = {},
+                    ignore=[],
+                    patient_strat=False,
+                    label_col = None,
+                    label_col2 = None,
+                    patient_voting = 'max',
+					subtype = None,
+                    **kwargs
+					):
+
+        super(Generic_Multi_Task_WSI_Dataset, self).__init__(
+            csv_path = csv_path,
+            shuffle = shuffle,
+            seed = seed,
+            print_info = print_info,
+            label_dict = label_dict,
+            ignore = ignore,
+            patient_strat = patient_strat,
+            label_col = label_col,
+            patient_voting = patient_voting,
+            **kwargs
+			)
+
+        self.label_dict = label_dict
+        self.label_dict2 = label_dict2
+        self.num_classes = len(set(self.label_dict.values()))
+        self.seed = seed
+        self.print_info = print_info
+        self.patient_strat = patient_strat
+        self.train_ids, self.val_ids, self.test_ids  = (None, None, None)
+        self.data_dir = None
+        if not label_col:
+            label_col = 'label'
+        if not label_col2:
+            label_col2 = 'Subtype'
+        self.label_col = label_col
+        self.label_col2 = label_col2
+
+        slide_data = pd.read_csv(csv_path)[['case_id', 'slide_id', 'label', 'Subtype']]  # 모든 slide	
+        # subtype을 지정하면 특정 subtype만 가지고 tmb classifier 학습
+        if subtype is not None:
+            slide_data = slide_data[slide_data['Subtype'] == subtype]
+            slide_data = self.df_prep2(slide_data, self.label_dict2, ignore, self.label_col2)	# subtype label을 숫자로 변경
+        slide_data = self.df_prep(slide_data, self.label_dict, ignore, self.label_col)		# label을 숫자로 변경
+
+        ###shuffle data
+        if shuffle:
+            np.random.seed(seed)
+            np.random.shuffle(slide_data)
+        self.slide_data = slide_data
+
+        if print_info:
+            self.summarize()						# print
+
+# main_multi.py에서 생성
+class Multi_Task_Dataset(Generic_Multi_Task_WSI_Dataset):       # Generic_MIL_Dataset
+    '''
+    output:
+        label: TMB label
+        label2: subtype label
+    slide 하나씩 불러옴
+    전체 slide patch들의 feature를 불러옴 
+    dim: (num_patch,1024)
+    '''
+    def __init__(self,
+        data_dir, 
+        **kwargs):
+
+        super(Multi_Task_Dataset, self).__init__(**kwargs)
+        self.data_dir = data_dir
+        self.use_h5 = False
+
+    def load_from_h5(self, toggle):
+        self.use_h5 = toggle
+
+    def __getitem__(self, idx):
+        case_id = self.slide_data['case_id'][idx]
+        slide_id = self.slide_data['slide_id'][idx]
+        label = self.slide_data['label'][idx]
+        label2 = self.slide_data['Subtype'][idx]
+        if type(self.data_dir) == dict:
+            source = self.slide_data['source'][idx]
+            data_dir = self.data_dir[source]
+        else:
+            data_dir = self.data_dir
+
+        if not self.use_h5:
+            if self.data_dir:
+                ########################################################################################################
+                # HIPT feature 쓸때 여기 바꿔야됨
+                # full_path = os.path.join(data_dir, 'pt_files', '{}.pt'.format(slide_id))	# 이게 원래 CLAM 인듯?
+                full_path = os.path.join(data_dir, 'pt_files','{}/{}.pt'.format(case_id, slide_id)).replace('.svs', '') # 종성님 CLAM - 이 방식으로 해야됨
+                features = torch.load(full_path)
+                # print(label, label2)
+                return features, label, label2
+            
+            else:
+                return slide_id, label
+
+        else:	# patch coordinates까지 포함되어 있음. coordinate 정보까지 이용하면 도움될 것 같은데 사용 안하고 있음
+            full_path = os.path.join(data_dir,'h5_files','{}.h5'.format(slide_id))
+            with h5py.File(full_path,'r') as hdf5_file:
+                features = hdf5_file['features'][:]
+                coords = hdf5_file['coords'][:]
+
+            features = torch.from_numpy(features)
+            return features, label, coords
+
+    def return_splits(self, from_id=False, csv_path=None): # from_id: Generic_WSI_Classification_Dataset에 return_splits이랑 똑같이 해주려고 넣음
+        assert csv_path 
+        all_splits = pd.read_csv(csv_path, dtype=self.slide_data['slide_id'].dtype)  # Without "dtype=self.slide_data['slide_id'].dtype", read_csv() will convert all-number columns to a numerical type. Even if we convert numerical columns back to objects later, we may lose zero-padding in the process; the columns must be correctly read in from the get-go. When we compare the individual train/val/test columns to self.slide_data['slide_id'] in the get_split_from_df() method, we cannot compare objects (strings) to numbers or even to incorrectly zero-padded objects/strings. An example of this breaking is shown in https://github.com/andrew-weisman/clam_analysis/tree/main/datatype_comparison_bug-2021-12-01.
+        train_split = self.get_split_from_df(all_splits, 'train')
+        val_split = self.get_split_from_df(all_splits, 'val')
+        test_split = self.get_split_from_df(all_splits, 'test')
+        
+        return train_split, val_split, test_split
+
+    def get_split_from_df(self, all_splits, split_key='train'):
+        split = all_splits[split_key]
+        split = split.dropna().reset_index(drop=True)
+
+        if len(split) > 0:
+            mask = (self.slide_data['case_id']+'/'+self.slide_data['slide_id']).isin(split.tolist())      # clam  
+            df_slice = self.slide_data[mask].reset_index(drop=True)
+            split = Multi_Task_Generic_Split(df_slice, data_dir=self.data_dir, num_classes=self.num_classes)
+        else:
+            split = None
+        
+        return split        
+
+
+class Multi_Task_Generic_Split(Multi_Task_Dataset):
+	def __init__(self, slide_data, data_dir=None, num_classes=2):
+		self.use_h5 = False
+		self.slide_data = slide_data
+		self.data_dir = data_dir
+		self.num_classes = num_classes
+		self.slide_cls_ids = [[] for i in range(self.num_classes)]
+		for i in range(self.num_classes):
+			self.slide_cls_ids[i] = np.where(self.slide_data['label'] == i)[0]
+
+	def __len__(self):
+		return len(self.slide_data)

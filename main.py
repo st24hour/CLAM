@@ -13,7 +13,7 @@ import math
 from utils.file_utils import save_pkl, load_pkl
 from utils.utils import *
 from utils.core_utils import train
-from datasets.dataset_generic import Generic_WSI_Classification_Dataset, Generic_MIL_Dataset
+from datasets.dataset_generic import Generic_WSI_Classification_Dataset, Generic_MIL_Dataset, Multi_Task_Dataset
 
 # pytorch imports
 import torch
@@ -50,9 +50,13 @@ def main(args):
     folds = np.arange(start, end)
     for i in folds:
         seed_torch(args.seed)
-        train_dataset, val_dataset, test_dataset = dataset.return_splits(from_id=False, 
-                csv_path='{}/splits_{}.csv'.format(args.split_dir, i))
-        
+        if args.task == 'multi_task':
+            train_dataset, val_dataset, test_dataset = dataset.return_splits(
+                    csv_path='{}/splits_{}.csv'.format(args.split_dir, i))
+        else:    
+            train_dataset, val_dataset, test_dataset = dataset.return_splits(from_id=False, 
+                    csv_path='{}/splits_{}.csv'.format(args.split_dir, i))
+
         datasets = (train_dataset, val_dataset, test_dataset)
         results, test_auc, val_auc, test_acc, val_acc  = train(datasets, i, args)
         all_test_auc.append(test_auc)
@@ -100,16 +104,16 @@ parser.add_argument('--csv_path', default='/shared/js.yun/CLAM/dataset_csv/TCGA-
 parser.add_argument('--log_data', action='store_true', default=False, help='log data using tensorboard')
 parser.add_argument('--testing', action='store_true', default=False, help='debugging tool')
 parser.add_argument('--early_stopping', action='store_true', default=False, help='enable early stopping')
-parser.add_argument('--opt', type=str, choices = ['adam', 'sgd'], default='adam')
+parser.add_argument('--opt', type=str, choices = ['adam', 'adamw', 'sgd'], default='adam')
 parser.add_argument('--drop_out', action='store_true', default=False, help='enable dropout (p=0.25)')
 parser.add_argument('--bag_loss', type=str, choices=['svm', 'ce'], default='ce',
                      help='slide-level classification loss function (default: ce)')
-parser.add_argument('--model_type', type=str, choices=['clam_sb', 'clam_mb', 'mil'], default='clam_sb', 
+parser.add_argument('--model_type', type=str, choices=['clam_sb', 'clam_mb', 'mil', 'clam_sb_multi'], default='clam_sb', 
                     help='type of model (default: clam_sb, clam w/ single attention branch)')
 parser.add_argument('--exp_code', type=str, help='experiment code for saving results')
 parser.add_argument('--weighted_sample', action='store_true', default=False, help='enable weighted sampling')
-parser.add_argument('--model_size', type=str, choices=['small', 'big', 'custom1'], default='small', help='size of model, does not affect mil')
-parser.add_argument('--task', type=str, choices=['task_1_tumor_vs_normal',  'task_2_tumor_subtyping'])
+parser.add_argument('--model_size', type=str, choices=['small', 'big', 'custom1', 'HIPT_4k_feat', 'HIPT_256_feat', 'custom2_big'], default='small', help='size of model, does not affect mil')
+parser.add_argument('--task', type=str, choices=['task_1_tumor_vs_normal',  'task_2_tumor_subtyping', 'multi_task'])
 parser.add_argument('--label_dict', type=json.loads, default='{"LUSC":0, "LUAD":1}')
 ### CLAM specific options
 parser.add_argument('--no_inst_cluster', action='store_true', default=False,
@@ -122,6 +126,10 @@ parser.add_argument('--bag_weight', type=float, default=0.7,
                     help='clam: weight coefficient for bag-level loss (default: 0.7)')
 parser.add_argument('--B', type=int, default=8, help='numbr of positive/negative patches to sample for clam')
 parser.add_argument('--attn', type=str, default="gated", help='type of attention')
+### JS MISC
+parser.add_argument('--label_smoothing', type=float, default=0, help='label smoothing factor range 0~1')
+parser.add_argument('--focal_loss', action='store_true', default=False, help='using focal loss')
+parser.add_argument('--loss_balance', type=float, default=1., help='weight term for balancing two loss')
 args = parser.parse_args()
 # print(args.label_dict)
 # print(type(args.label_dict))
@@ -228,8 +236,8 @@ if args.model_type in ['clam_sb', 'clam_mb']:
 
 print('\nLoad Dataset')
 
+args.n_classes=n_classes
 if args.task == 'task_1_tumor_vs_normal':
-    args.n_classes=n_classes
     dataset = Generic_MIL_Dataset(#csv_path = 'dataset_csv/tumor_vs_normal_dummy_clean.csv',
                                   csv_path = args.csv_path,
                             data_dir= os.path.join(args.data_root_dir, args.feature_folder),
@@ -243,7 +251,6 @@ if args.task == 'task_1_tumor_vs_normal':
                             ignore=[])
 
 elif args.task == 'task_2_tumor_subtyping':
-    args.n_classes=n_classes
     #dataset = Generic_MIL_Dataset(csv_path = 'dataset_csv/tumor_subtyping_dummy_clean.csv',
     dataset = Generic_MIL_Dataset(csv_path=args.csv_path,
                             #data_dir= os.path.join(args.data_root_dir, 'tumor_subtyping_resnet_features'),
@@ -258,7 +265,17 @@ elif args.task == 'task_2_tumor_subtyping':
 
     if args.model_type in ['clam_sb', 'clam_mb']:
         assert args.subtyping 
-        
+
+elif args.task == 'multi_task':
+    dataset = Multi_Task_Dataset(csv_path=args.csv_path,
+                            data_dir=os.path.join(args.data_root_dir, args.feature_folder),
+                            shuffle = False, 
+                            seed = args.seed, 
+                            print_info = True,
+                            label_dict = args.label_dict,
+                            label_dict2 = {'LUSC':0, 'LUAD':1},
+                            patient_strat= False,
+                            ignore=[])
 else:
     raise NotImplementedError
     
@@ -276,8 +293,16 @@ def change_permissions_recursive(path, mode=0o777):
 ##################################################################
 # 이하 전부 logging용 코드
 args.scheduler = None
-hp_setting = f'{args.attn}_{args.opt}_lr_{args.lr}_sch_{args.scheduler}_decay_{args.decay_epoch}\
-_wd_{args.reg}_epoch{args.max_epochs}_stop_{args.early_stopping}_drop_{args.drop_out}_B{args.B}\
+if args.label_smoothing > 0:
+    args.exp_code = args.exp_code + '_LS'
+    method = f'LS{args.label_smoothing}'
+elif args.focal_loss:
+    args.exp_code = args.exp_code + '_FL'
+    method = f'FL'
+else:
+    method = f''
+hp_setting = f'{method}_{args.attn}_{args.opt}_lr_{args.lr}_sch_{args.scheduler}_decay_{args.decay_epoch}\
+_wd_{args.reg}_epoch{args.max_epochs}_weighted_{args.weighted_sample}_drop_{args.drop_out}_B{args.B}\
 '.replace("[", "").replace("]", "").replace(",", "_").replace(" ", "")
 
 i=0
@@ -311,7 +336,7 @@ for key, val in settings.items():
 
 if __name__ == "__main__":
     results = main(args)
-    change_permissions_recursive(args.results_dir)
+    change_permissions_recursive(args.results_dir+'/../../')
     print("finished!")
     print("end script")
 
