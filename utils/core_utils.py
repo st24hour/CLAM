@@ -792,7 +792,7 @@ def validate_multi(
         val_loss_subtype = 0.
         val_error_subtype = 0.
         prob_subtype = np.zeros((len(loader), args.n_classes_subtype))
-        labels_subtype = np.zeros(len(loader))
+    labels_subtype = np.zeros(len(loader))          # subtype별 tmb auc 구할 때도 필요하므로 balance[1]==0인 경우에도 필요
     if balance[2]:
         acc_logger_instance = Accuracy_Logger(n_classes=args.n_classes if balance[0] else args.n_classes_subtype)
         val_loss_instance = 0.
@@ -801,10 +801,9 @@ def validate_multi(
     with torch.no_grad():
         for batch_idx, (data, label, label_subtype) in enumerate(loader):
             data = data.to(device, non_blocking=True)
+            label_subtype = label_subtype.to(device, non_blocking=True)
             if balance[0]:
                 label = label.to(device, non_blocking=True)
-            if balance[1]:
-                label_subtype = label_subtype.to(device, non_blocking=True)
 
             logits, logits_subtype, _, instance_dict = model(data, label=label if balance[0] else label_subtype, instance_eval=balance[2]!=0)
 
@@ -833,12 +832,12 @@ def validate_multi(
                 loss_subtype = loss_fn_subtype(logits_subtype, label_subtype)
                 loss_value_subtype = loss_subtype.item()
                 val_loss_subtype += loss_value_subtype
-                # auc 계산용
-                prob_subtype[batch_idx] = Y_prob_subtype.cpu().numpy()
-                labels_subtype[batch_idx] = label_subtype.item()
                 # err, total loss
                 error_sub = calculate_error(Y_hat_subtype, label_subtype)
                 val_error_subtype += error_sub
+                # auc 계산용
+                prob_subtype[batch_idx] = Y_prob_subtype.cpu().numpy()
+            labels_subtype[batch_idx] = label_subtype.item()
             
             if balance[2]:
                 # acc
@@ -1147,7 +1146,7 @@ def summary_multi(args, model, loader):
         acc_logger_subtype = Accuracy_Logger(n_classes=args.n_classes_subtype)
         test_error_subtype = 0.
         prob_subtype = np.zeros((len(loader), args.n_classes_subtype))
-        labels_subtype = np.zeros(len(loader))
+    labels_subtype = np.zeros(len(loader))
     if balance[2]:
         acc_logger_instance = Accuracy_Logger(n_classes=args.n_classes if balance[0] else args.n_classes_subtype)
         test_loss_instance = 0.
@@ -1158,10 +1157,9 @@ def summary_multi(args, model, loader):
 
     for batch_idx, (data, label, label_subtype) in enumerate(loader):
         data = data.to(device, non_blocking=True)
+        label_subtype = label_subtype.to(device)
         if balance[0]:
             label = label.to(device, non_blocking=True)
-        if balance[1]:
-            label_subtype = label_subtype.to(device)
                 
         slide_id = slide_ids.iloc[batch_idx]
         with torch.no_grad():
@@ -1189,16 +1187,16 @@ def summary_multi(args, model, loader):
             Y_hat_subtype = torch.topk(logits_subtype.detach(), 1, dim=1)[1]     # [1,1]
             Y_prob_subtype = F.softmax(logits_subtype, dim = 1)     # subtype prob
             acc_logger_subtype.log(Y_hat_subtype, label_subtype)
-            # auc 계산용
-            probs_sub = Y_prob_subtype.cpu().numpy()
-            prob_subtype[batch_idx] = probs_sub
-            labels_subtype[batch_idx] = label_subtype.item()
             # err, total loss
             error_sub = calculate_error(Y_hat_subtype, label_subtype)
             test_error_subtype += error_sub
             # result for save pickle
             # patient_results.update({slide_id: {'slide_id': np.array(slide_id), 'prob_sub': probs_sub, 'label_sub': label_subtype.item()}})  # subtype 정보는 저장 안함
             patient_results[slide_id].update({'prob_sub': probs_sub, 'label_sub': label_subtype.item()})  # subtype 정보는 저장 안함
+            # auc 계산용
+            probs_sub = Y_prob_subtype.cpu().numpy()
+            prob_subtype[batch_idx] = probs_sub
+        labels_subtype[batch_idx] = label_subtype.item()
         if balance[2]:
             # acc
             inst_preds = instance_dict['inst_preds']        # numpy array

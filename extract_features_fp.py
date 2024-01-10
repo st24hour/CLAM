@@ -224,6 +224,8 @@ if __name__ == '__main__':
     elif args.image_encoder == 'HIPT_256':
         assert args.model_256_path
         model = get_vit256(args.model_256_path) # if args.model_256_path else vits.__dict__['vit_small'](patch_size=16, num_classes=0)    
+    elif args.image_encoder == 'vitb-img224':       # random initialize된 baseline 성능 확인용 
+        model = get_vit256(args.model_256_path, 'vit_base')
     else:
         ValueError("not supported image encoder")
     model = model.to(device)

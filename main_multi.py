@@ -1,3 +1,8 @@
+'''
+왜 만들었는지 기억이 안남
+아마 main_tmb.py에 다 포함돼서 이 코드는 쓸 일 없을듯
+'''
+
 from __future__ import print_function
 
 import argparse

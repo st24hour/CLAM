@@ -176,7 +176,7 @@ parser.add_argument('--attn', type=str, default="gated", help='type of attention
 ### JS MISC
 parser.add_argument('--label_smoothing', type=float, default=0, help='label smoothing factor range 0~1')
 parser.add_argument('--focal_loss', action='store_true', default=False, help='using focal loss')
-parser.add_argument('--loss_balance', type=float, nargs='+', default=[1.,0.,1.], help='weight term for balancing three losses')
+parser.add_argument('--loss_balance', type=float, nargs='+', default=[1.,0.,1.], help='weight term for balancing three losses: tmb, subtype, instance loss')
 parser.add_argument('--label_column', type=str, choices=['Mutation Count', 'TMB (nonsynonymous)', 'Subtype'], default='TMB (nonsynonymous)', help='tmb label column')
 parser.add_argument('--target_subtype', type=str, nargs='+', default=['LUSC', 'LUAD'], help='tmb label column')
 parser.add_argument('--tmb_high_ratio', type=float, default=0.3, help='tmb high percentage')

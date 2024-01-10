@@ -273,8 +273,8 @@ if __name__ == '__main__':
 	args.patch = True
 	args.seg = True
 	args.stitch = True
-	args.save_dir = '/shared/js.yun/data/CLAM_data/TCGA-kidney-patches/'
-	args.source = '/shared/js.yun/data/CLAM_data/TCGA-kidney/'
+	args.save_dir = '/shared/js.yun/data/CLAM_data/TCGA-lung-h5-patches/'
+	args.source = '/shared/j.jang/pathai/data/TCGA-lung/'
 	#####################
 
 	patch_save_dir = os.path.join(args.save_dir, 'patches')

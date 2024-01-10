@@ -486,7 +486,10 @@ class Split_Gene_Clip_Dataset(Dataset):
         ):
         self.seed = seed
         self.num_splits = num_splits
+        self.val_frac=val_frac
+        self.test_frac=test_frac
         np.random.seed(self.seed)
+        random.seed(self.seed)
 
         self.slide_data = pd.read_csv(wsi_csv_path)[['case_id', 'slide_id', 'label', 'Subtype', 'Mutation Count', 'TMB (nonsynonymous)']]
         self.genomics_data = pd.read_csv(genomics_csv_path)
@@ -496,13 +499,13 @@ class Split_Gene_Clip_Dataset(Dataset):
         self.num_test = np.round(self.num_data * test_frac).astype(int)     # 181
         self.num_train = self.num_data-self.num_val-self.num_test           # 635
         
-        print(f'number of train set: {self.num_train}')                 # 635
-        print(f'number of validation set: {self.num_val}')              # 91
-        print(f'number of test set: {self.num_test}')                   # 181
+        # print(f'number of train set: {self.num_train}')                 # 635
+        # print(f'number of validation set: {self.num_val}')              # 91
+        # print(f'number of test set: {self.num_test}')                   # 181
         # df로 저장
         columns = ['train', 'val', 'test']
-        num_splits = [self.num_train, self.num_val, self.num_test]
-        count_dataset = pd.DataFrame([num_splits], columns=columns)
+        num_each_splits = [self.num_train, self.num_val, self.num_test]
+        count_dataset = pd.DataFrame([num_each_splits], columns=columns)
         # display(count_dataset)
 
     def create_splits_index(self):        
@@ -513,7 +516,11 @@ class Split_Gene_Clip_Dataset(Dataset):
             test_index = np.random.choice(remaining_ids, self.num_test, replace = False) 
             train_index = np.setdiff1d(remaining_ids, test_index)
 
-            assert len(train_index)+len(val_index)+len(test_index) > 0
+            if self.val_frac > 0:
+                assert len(val_index) > 0
+            if self.test_frac > 0:
+                assert len(test_index) > 0
+            assert len(train_index) > 0
             assert len(np.intersect1d(train_index, test_index)) == 0
             assert len(np.intersect1d(train_index, val_index)) == 0
             assert len(np.intersect1d(val_index, test_index)) == 0
@@ -545,33 +552,85 @@ class Clip_dataset(Dataset):
         self.wsi_feature_dir = wsi_feature_dir
         self.seed = seed
         np.random.seed(self.seed)
+        random.seed(self.seed)
 
         # genomics dataset
-        self.selected_columns = set(pd.read_csv(split_csv_path)[phase])                      # training set에 있는 환자 set
+        self.selected_columns = list(pd.read_csv(split_csv_path)[phase].dropna())                        # training set에 있는 환자 set
         genomics_data = pd.read_csv(genomics_csv_path)
-        self.genomics_data = genomics_data.loc[:, genomics_data.columns.isin(self.selected_columns)]
+        self.genomics_data = genomics_data.loc[:, genomics_data.columns.isin(self.selected_columns)]    # self.selected_columns에 있는 환자의 genomics만 가져온 df
         self.length = self.genomics_data.shape[1]
 
         # WSI dataset
         slide_data = pd.read_csv(wsi_csv_path)[['case_id', 'slide_id']]
         slide_data['patient'] = slide_data['slide_id'].str.split('-').apply(lambda x: '-'.join(x[:3] + [x[3][:2]]))
-        self.slide_data = slide_data[slide_data['patient'].isin(self.selected_columns)]
+        self.slide_data = slide_data[slide_data['patient'].isin(self.selected_columns)]                 # csv 파일 중에서 self.selected_columns에 있는 환자의 csv만 가져온 df
 
     def __len__(self):
         return self.length
 
     def __getitem__(self, idx):
-        # genomics data 불러옴
-        genomics = self.genomics_data.iloc[:,idx].to_numpy()
+        # 불러올 환자 선택
+        selected_column = list(self.selected_columns)[idx]
 
-        indices = self.slide_data.index[self.slide_data['patient'] == list(self.selected_columns)[idx]].tolist()
-        if len(indices) > 1:
-            index = random.choice(indices)
+        # genomics data 불러옴
+        genomics = self.genomics_data[selected_column].to_numpy()
+
+        # image data 불러옴
+        indices_wsi = self.slide_data.index[self.slide_data['patient'] == selected_column].tolist()
+        if len(indices_wsi) > 1:
+            index = random.choice(indices_wsi)
         else:
-            index = indices[0]
+            index = indices_wsi[0]
         case_id = self.slide_data['case_id'][index]
         slide_id = self.slide_data['slide_id'][index]
         full_path = os.path.join(self.wsi_feature_dir, 'pt_files','{}/{}.pt'.format(case_id, slide_id)).replace('.svs', '') # 종성님 CLAM - 이 방식으로 해야됨
         features = torch.load(full_path)
 
-        return genomics, features
+        return features, genomics
+    
+
+class Genomics_TMB_dataset(Dataset):
+    def __init__(self,
+        split_csv_path = '/shared/js.yun/data/CLAM_data/clip_data/TCGA-lung-splits_5-frac_1_0_0-seed0/splits_0.csv',
+        genomics_csv_path = '/shared/js.yun/data/CLAM_data/genomics_data/TCGA-lung-LUAD+LUSC-selected_2847_zscore.csv',        
+        wsi_csv_path = '/shared/j.jang/pathai/CLAM/dataset_csv/TCGA-lung-LUAD+LUSC-TMB-pan_cancer-323.csv',
+        wsi_feature_dir = '/shared/j.jang/pathai/data/TCGA-lung-x256-features-dino-from-pretrained-vitb-img224/',
+        phase = 'train',
+        seed = 1,
+        ):
+        self.wsi_feature_dir = wsi_feature_dir
+        self.seed = seed
+        np.random.seed(self.seed)
+        random.seed(self.seed)
+
+        # genomics dataset
+        self.selected_columns = set(pd.read_csv(split_csv_path)[phase].dropna())                      # training set에 있는 환자 set
+        genomics_data = pd.read_csv(genomics_csv_path)
+        self.genomics_data = genomics_data.loc[:, genomics_data.columns.isin(self.selected_columns)]
+        self.length = self.genomics_data.shape[1]
+
+        # TMB dataset
+        slide_data = pd.read_csv(wsi_csv_path)[['case_id', 'slide_id', 'Mutation Count']]
+        slide_data['patient'] = slide_data['slide_id'].str.split('-').apply(lambda x: '-'.join(x[:3] + [x[3][:2]]))
+        self.slide_data = slide_data[slide_data['patient'].isin(self.selected_columns)]
+
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, idx):
+        # 불러올 환자 선택
+        selected_column = list(self.selected_columns)[idx]
+        
+        # genomics data 불러옴
+        genomics = self.genomics_data[selected_column].to_numpy()
+
+        # mutation count 값 불러옴
+        indices = self.slide_data.index[self.slide_data['patient'] == selected_column].tolist()
+        if len(indices) > 1:
+            index = random.choice(indices)
+        else:
+            index = indices[0]
+        mutation_count = self.slide_data['Mutation Count'][index]
+        
+        return genomics, mutation_count

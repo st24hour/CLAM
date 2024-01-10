@@ -15,6 +15,9 @@ import torch.nn.functional as F
 import math
 from itertools import islice
 import collections
+import random
+import os
+
 device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class SubsetSequentialSampler(Sampler):
@@ -201,6 +204,15 @@ def setup_logger(name, save_dir, distributed_rank, filename="log.txt"):
     import os 
     import sys
     import logging
+    from datetime import datetime, timedelta
+    import pytz
+
+    class _KSTFormatter(logging.Formatter):    
+        def formatTime(self, record, datefmt=None):
+            kst = pytz.timezone('Asia/Seoul')
+            utc_dt = datetime.utcfromtimestamp(record.created)
+            localized_dt = utc_dt.replace(tzinfo=pytz.utc).astimezone(kst)
+            return localized_dt.strftime(datefmt or "%Y-%m-%d %H:%M:%S")
 
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)
@@ -210,9 +222,11 @@ def setup_logger(name, save_dir, distributed_rank, filename="log.txt"):
     # don't log results for the non-master process
     if distributed_rank > 0:
         return logger
+    
+    formatter = _KSTFormatter("%(asctime)s: %(message)s")
+	
     streamHandler = logging.StreamHandler(stream=sys.stdout)
     streamHandler.setLevel(logging.DEBUG)
-    formatter = logging.Formatter("%(asctime)s: %(message)s")
     streamHandler.setFormatter(formatter)
     logger.addHandler(streamHandler)
 
@@ -223,3 +237,44 @@ def setup_logger(name, save_dir, distributed_rank, filename="log.txt"):
         logger.addHandler(fileHandler)
 
     return logger
+
+def calculate_accuracy(logits, ground_truth):
+    predictions = torch.argmax(logits, dim=1)
+    correct_predictions = (predictions == ground_truth).sum().item()
+    accuracy = correct_predictions / ground_truth.size(0)  # 정확도를 샘플 개수로 나누어 계산
+    return accuracy
+
+def calculate_paired_accuracy(logits_per_image, logits_per_text, ground_truth):
+    # 이미지와 텍스트에 대한 클래스 예측
+    image_predictions = torch.argmax(logits_per_image, dim=1)
+    text_predictions = torch.argmax(logits_per_text, dim=1)
+
+    # 이미지와 텍스트 예측이 모두 ground_truth와 일치하는지 확인
+    correct_image = torch.eq(image_predictions, ground_truth)
+    correct_text = torch.eq(text_predictions, ground_truth)
+
+    # 이미지와 텍스트 예측이 모두 정확한 경우를 카운트
+    correct_both = torch.logical_and(correct_image, correct_text)
+    
+    # 정확도 계산
+    accuracy = torch.sum(correct_both).item() / len(ground_truth)
+    
+    return accuracy
+
+def combine_dicts(*args):
+    combined_dict = {}
+    for dictionary in args:
+        for key, value in dictionary.items():
+            combined_dict[key] = value
+    return combined_dict
+
+def seed_torch(seed=1):
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if device.type == 'cuda':
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed) # if you are using multi-GPU.
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True

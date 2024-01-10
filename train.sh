@@ -1,7 +1,92 @@
 # GPU 0, 8
 
-# ##################################### 231024 ######################################
-CUDA_VISIBLE_DEVICES=1 python main_clip.py 
+##################################### 231211 ######################################
+for i in 0.0005
+do
+    CUDA_VISIBLE_DEVICES=15 python main_clip.py \
+                                    --note early_num_layer_0 \
+                                    --genomics_encoder 'Genomics_Encoder_FC' \
+                                    --num_layers_genom 0 \
+                                    --lr $i \
+                                    --epochs 1 \
+                                    --folds 1 \
+                                    --batch_size 64 \
+                                    --save_dir '/shared/js.yun/logs/CLAM/clip/base' \
+                                    --use_batch
+done
+
+##################################### 231206 ######################################
+# for i in 0.0005
+# do
+#     CUDA_VISIBLE_DEVICES=0 python main_clip.py \
+#                                     --note early_fusion \
+#                                     --genomics_encoder 'Genomics_Encoder_FC_Skip_early_v1' \
+#                                     --lr $i \
+#                                     --epochs 20 \
+#                                     --batch_size 64 \
+#                                     --save_dir '/shared/js.yun/logs/CLAM/clip/temp' \
+#                                     --use_batch
+# done
+
+# # # ##################################### 231128 ######################################
+# # random vitb 모델로 뽑은 feature로 clam, LUSC만 따로, clam_mb_multi
+# exp_code='TCGA-lung-vitb_256_random'
+# # data_root_dir='/shared/j.jang/pathai/data/'
+# # feature_folder='TCGA-lung-x256-features-dino-from-pretrained-vitb-img224/'
+# data_root_dir='/shared/js.yun/data/CLAM_data/'
+# feature_folder='TCGA-lung-x256-features-from-random-vitb-img224/'
+
+# # results_dir='/shared/js.yun/logs/CLAM/DINO_ours_vitb_256_custom2_big_230921/'
+# # results_dir='/shared/js.yun/logs/CLAM/DINO_ours_vitb_256_custom2_big_231017/'
+# results_dir='/shared/js.yun/logs/CLAM/Random_feature/'
+# label_dict='{"TMB_low":0, "TMB_high":1}'
+# label_dict2='{"LUSC":0, "LUAD":1}'
+
+# split_dir='/shared/js.yun/data/CLAM_data/'
+# csv_path='/shared/j.jang/pathai/CLAM/dataset_csv/TCGA-lung-LUAD+LUSC-TMB-pan_cancer-323.csv'
+
+# # label_column 'TMB (nonsynonymous)', 'Mutation Count', 'Subtype'
+# # for i in 0.0001 0.00001 0.001 
+# for i in 0.1
+# do
+#     CUDA_VISIBLE_DEVICES=15 python main_tmb.py --drop_out \
+#                                         --seed 1 \
+#                                         --lr 2e-4 \
+#                                         --reg 0.00001 \
+#                                         --label_smoothing 0 \
+#                                         --k 5 \
+#                                         --label_frac 1 \
+#                                         --exp_code $exp_code \
+#                                         --bag_loss ce \
+#                                         --inst_loss svm \
+#                                         --task multi_task \
+#                                         --model_type clam_mb_multi \
+#                                         --log_data \
+#                                         --data_root_dir $data_root_dir \
+#                                         --feature_folder $feature_folder \
+#                                         --results_dir $results_dir \
+#                                         --split_dir $split_dir \
+#                                         --csv_path $csv_path \
+#                                         --subtyping \
+#                                         --opt adam \
+#                                         --decay_epoch 300 \
+#                                         --max_epochs 50 \
+#                                         --label_dict "$label_dict" \
+#                                         --label_dict2 "$label_dict2" \
+#                                         --model_size 'custom2_big' \
+#                                         --weighted_sample \
+#                                         --target_subtype LUAD LUSC \
+#                                         --label_column 'Mutation Count' \
+#                                         --loss_balance 0.3 0 0.7 \
+#                                         --tmb_high_ratio 0.25
+#                                         # --no_inst_cluster
+# done
+
+# ##################################### 231127 ######################################
+# for i in 0.125 0.25 0.5 1
+# do 
+#     CUDA_VISIBLE_DEVICES=0 python main_clip.py --epochs 20 --note wd_tuning --wd $i
+# done
 
 # ##################################### 231024 ######################################
 # # vitb 모델로 뽑은 feature로 clam, LUSC만 따로, clam_mb_multi + label smoothing
